@@ -85,11 +85,20 @@
                           <Border Padding="10,8" Margin="4,2" CornerRadius="4" BorderBrush="#313244" BorderThickness="1"
                                   Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}"
                                   PointerPressed="OnModelItemClick" Cursor="Hand">
-                            <StackPanel Spacing="3">
-                              <TextBlock Text="{Binding ModelId}" FontSize="13" FontWeight="Bold" Foreground="#CDD6F4" />
-                              <TextBlock Text="{Binding Name}" FontSize="11" Foreground="#A6ADC8" />
-                              <TextBlock Text="{Binding CmdPreview}" FontSize="10" Foreground="#6C7086" TextWrapping="Wrap" />
-                            </StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
+                              <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="13" FontWeight="Bold" Foreground="#CDD6F4" />
+                              <Button Grid.Row="0" Grid.Column="1"
+                                      Content="⧉"
+                                      ToolTip.Tip="Clone model for parameter experiments"
+                                      PointerPressed="OnCloneModelPointerPressed"
+                                      Click="OnCloneModelClick"
+                                      Padding="7,2"
+                                      MinWidth="30"
+                                      FontSize="13"
+                                      Classes="success" />
+                              <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Name}" FontSize="11" Foreground="#A6ADC8" />
+                              <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CmdPreview}" FontSize="10" Foreground="#6C7086" TextWrapping="Wrap" />
+                            </Grid>
                           </Border>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>

@@ -452,6 +452,48 @@ public partial class MainViewModel : ObservableObject
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
 
+
+
+    public void ExecuteCloneModel(ModelEditItem source)
+    {
+        if (source == null) return;
+
+        if (SelectedModel?.IsNew == true)
+        {
+            StatusText = "Save or cancel the current new model before cloning another one.";
+            StatusColor = "#F38BA8";
+            return;
+        }
+
+        var baseId = string.IsNullOrWhiteSpace(source.ModelId) ? "model" : source.ModelId.Trim();
+        var cloneId = GetUniqueModelId($"{baseId}_copy");
+        var clone = source.CloneAs(cloneId);
+        clone.IsNew = true;
+
+        foreach (var m in Models) m.IsSelected = false;
+        clone.IsSelected = true;
+        Models.Add(clone);
+        SelectedModel = clone;
+        HasSelectedModel = true;
+        IsNewModel = true;
+        UpdateSelectedModelSourceLabel();
+        StatusText = $"Cloned {source.ModelId}. Adjust parameters, then click Save.";
+        StatusColor = "#A6E3A1";
+        (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
+    }
+
+    private string GetUniqueModelId(string preferred)
+    {
+        var candidate = preferred;
+        var suffix = 2;
+        while (Models.Any(m => string.Equals(m.ModelId, candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            candidate = $"{preferred}_{suffix}";
+            suffix++;
+        }
+        return candidate;
+    }
+
     private void ExecuteCancelModel()
     {
         if (SelectedModel == null) return;
@@ -970,6 +1012,67 @@ public partial class ModelEditItem : ObservableObject
     [ObservableProperty] private bool _isSelected = false;
 
     public string CmdPreview => !string.IsNullOrWhiteSpace(ModelPath) ? $"-m {Path.GetFileName(ModelPath)} --temp {Temperature}" : $"--hf {HfModel} --temp {Temperature}";
+
+    public ModelEditItem CloneAs(string newModelId)
+    {
+        return new ModelEditItem
+        {
+            ModelId = newModelId,
+            Name = string.IsNullOrWhiteSpace(Name) ? newModelId : $"{Name} copy",
+            Description = Description,
+            AliasesText = "",
+            LlamaServerPath = LlamaServerPath,
+            ModelPath = ModelPath,
+            HfModel = HfModel,
+            Host = Host,
+            Port = Port,
+            UseJinja = UseJinja,
+            ContextSize = ContextSize,
+            Predict = Predict,
+            Threads = Threads,
+            ThreadsBatch = ThreadsBatch,
+            BatchSize = BatchSize,
+            UBatchSize = UBatchSize,
+            GpuLayers = GpuLayers,
+            Device = Device,
+            SplitMode = SplitMode,
+            TensorSplit = TensorSplit,
+            MainGpu = MainGpu,
+            FlashAttention = FlashAttention,
+            FitOn = FitOn,
+            NoMmap = NoMmap,
+            Mlock = Mlock,
+            CacheTypeK = CacheTypeK,
+            CacheTypeV = CacheTypeV,
+            Temperature = Temperature,
+            TopK = TopK,
+            TopP = TopP,
+            MinP = MinP,
+            RepeatPenalty = RepeatPenalty,
+            PresencePenalty = PresencePenalty,
+            FrequencyPenalty = FrequencyPenalty,
+            RepeatLastN = RepeatLastN,
+            Seed = Seed,
+            Samplers = Samplers,
+            Parallel = Parallel,
+            ContBatching = ContBatching,
+            Embeddings = Embeddings,
+            Reranking = Reranking,
+            Metrics = Metrics,
+            PropsEndpoint = PropsEndpoint,
+            Slots = Slots,
+            Timeout = Timeout,
+            ThreadsHttp = ThreadsHttp,
+            ApiKey = ApiKey,
+            ChatTemplate = ChatTemplate,
+            Reasoning = Reasoning,
+            ReasoningFormat = ReasoningFormat,
+            ReasoningBudget = ReasoningBudget,
+            ExtraArgs = ExtraArgs,
+            Ttl = Ttl,
+            IsNew = true
+        };
+    }
 
     public static ModelEditItem Parse(string modelId, ModelConfig config)
     {

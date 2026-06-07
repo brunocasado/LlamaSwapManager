@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
@@ -23,6 +24,21 @@ public partial class MainWindow : Window
         {
             vm.ExecuteSelectModel(model);
         }
+    }
+
+    private void OnCloneModelClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        if (DataContext is MainViewModel vm && sender is Button button && button.DataContext is ModelEditItem model)
+        {
+            vm.ExecuteCloneModel(model);
+        }
+    }
+
+    private void OnCloneModelPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        e.Handled = true;
     }
 
     private async void OnChooseModelClick(object? sender, RoutedEventArgs e)
