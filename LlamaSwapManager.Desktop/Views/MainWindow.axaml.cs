@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using LlamaSwapManager.ViewModels;
 
 namespace LlamaSwapManager.Views;
@@ -22,7 +23,22 @@ public partial class MainWindow : Window
     {
         if (DataContext is MainViewModel vm && sender is Border border && border.DataContext is ModelEditItem model)
         {
-            vm.ExecuteSelectModel(model);
+            e.Handled = true;
+            FocusManager?.Focus(null);
+
+            // Let the currently focused TextBox commit clipboard/selection/text changes
+            // before SelectedModel swaps the editor DataContext underneath it.
+            Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    vm.ExecuteSelectModel(model);
+                }
+                catch (Exception ex)
+                {
+                    vm.ReportUiError($"Model selection failed: {ex.Message}");
+                }
+            }, DispatcherPriority.Background);
         }
     }
 

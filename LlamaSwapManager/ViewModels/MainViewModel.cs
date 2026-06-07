@@ -411,6 +411,13 @@ public partial class MainViewModel : ObservableObject
         _ = RefreshRuntimeStateAsync();
     }
 
+    public void ReportUiError(string message)
+    {
+        StatusText = message;
+        StatusColor = "#F38BA8";
+        OnLogMessage($"[ui] {message}");
+    }
+
     public void ExecuteSelectModel(ModelEditItem model)
        {
            if (model == null) return;

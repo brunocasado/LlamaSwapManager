@@ -84,7 +84,7 @@
                         <DataTemplate x:DataType="vm:ModelEditItem">
                           <Border Padding="10,8" Margin="4,2" CornerRadius="4" BorderBrush="#313244" BorderThickness="1"
                                   Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}"
-                                  PointerPressed="OnModelItemClick" Cursor="Hand">
+                                  PointerReleased="OnModelItemClick" Cursor="Hand">
                             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
                               <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="13" FontWeight="Bold" Foreground="#CDD6F4" />
                               <Button Grid.Row="0" Grid.Column="1"
