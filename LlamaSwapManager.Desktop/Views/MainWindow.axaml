@@ -406,6 +406,32 @@
                 </StackPanel>
               </StackPanel>
             </Border>
+            <Border Padding="16" Background="#313244" CornerRadius="10">
+              <StackPanel Spacing="10">
+                <TextBlock Text="Eviction priority" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                <TextBlock Text="Choose what unloads first when memory is tight." FontSize="12" Foreground="#A6ADC8" />
+                <Grid ColumnDefinitions="70,*,170,90" ColumnSpacing="12">
+                  <TextBlock Grid.Column="0" Text="Alias" FontSize="11" Foreground="#6C7086" />
+                  <TextBlock Grid.Column="1" Text="Model" FontSize="11" Foreground="#6C7086" />
+                  <TextBlock Grid.Column="2" Text="Priority" FontSize="11" Foreground="#6C7086" />
+                  <TextBlock Grid.Column="3" Text="Cost" FontSize="11" Foreground="#6C7086" />
+                </Grid>
+                <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsControl ItemsSource="{Binding EvictCosts}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:EvictCostItem">
+                        <Grid ColumnDefinitions="70,*,170,90" ColumnSpacing="12" Margin="0,4">
+                          <TextBlock Grid.Column="0" Text="{Binding Key}" Foreground="#89B4FA" FontWeight="Bold" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Text="{Binding ModelId}" Foreground="#CDD6F4" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                          <ComboBox Grid.Column="2" ItemsSource="{Binding PriorityOptions}" SelectedItem="{Binding Priority}" />
+                          <TextBox Grid.Column="3" Text="{Binding Value}" PlaceholderText="cost" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </StackPanel>
+            </Border>
           </StackPanel>
 
           <!-- Scroll only combinations -->
