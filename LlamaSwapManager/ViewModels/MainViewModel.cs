@@ -737,7 +737,9 @@ public partial class MainViewModel : ObservableObject
         // preview/save path runs after checking/unchecking combinations.
         var vars = ParseKeyValueLines(MatrixVarsText).ToDictionary(v => v.Key.Trim(), v => v.Value.Trim());
         var sets = ParseKeyValueLines(MatrixSetsText).ToDictionary(s => s.Key.Trim(), s => s.Value.Trim());
-        var costs = EvictCosts.Where(c => !string.IsNullOrWhiteSpace(c.Key) && int.TryParse(c.Value, out _)).ToDictionary(c => c.Key.Trim(), c => int.TryParse(c.Value, out var v) ? v : 0);
+        var costs = EvictCosts
+            .Where(c => !string.IsNullOrWhiteSpace(c.Key) && int.TryParse(c.Value, out var parsed) && parsed > 0)
+            .ToDictionary(c => c.Key.Trim(), c => int.Parse(c.Value.Trim()));
         if (sets.Any())
         {
             config.Matrix = new MatrixConfig
@@ -786,7 +788,9 @@ public partial class MainViewModel : ObservableObject
     {
         MatrixVarsText = string.Join(Environment.NewLine, MatrixVars.Where(v => !string.IsNullOrWhiteSpace(v.Key) || !string.IsNullOrWhiteSpace(v.Value)).Select(v => $"{v.Key} = {v.Value}"));
         MatrixSetsText = string.Join(Environment.NewLine, MatrixSets.Where(v => !string.IsNullOrWhiteSpace(v.Key) || !string.IsNullOrWhiteSpace(v.Value)).Select(v => $"{v.Key} = {v.Value}"));
-        EvictCostsText = string.Join(Environment.NewLine, EvictCosts.Where(v => !string.IsNullOrWhiteSpace(v.Key) || !string.IsNullOrWhiteSpace(v.Value)).Select(v => $"{v.Key} = {v.Value}"));
+        EvictCostsText = string.Join(Environment.NewLine, EvictCosts
+            .Where(v => !string.IsNullOrWhiteSpace(v.Key) && int.TryParse(v.Value, out var parsed) && parsed > 0)
+            .Select(v => $"{v.Key} = {v.Value}"));
     }
 
     private void SyncMatrixCollectionsFromText()
@@ -801,7 +805,10 @@ public partial class MainViewModel : ObservableObject
 
         EvictCosts.Clear();
         foreach (var item in ParseKeyValueLines(EvictCostsText))
-            EvictCosts.Add(new EvictCostItem { Key = item.Key, Value = item.Value, ParentCollection = EvictCosts });
+        {
+            var value = int.TryParse(item.Value, out var parsed) && parsed > 0 ? item.Value : string.Empty;
+            EvictCosts.Add(new EvictCostItem { Key = item.Key, Value = value, ParentCollection = EvictCosts });
+        }
     }
 
     private void SyncEvictCostsWithCurrentVars()
@@ -838,7 +845,7 @@ public partial class MainViewModel : ObservableObject
             existingByAlias.TryGetValue(alias, out var byAlias);
             var previous = byModel ?? byAlias;
             var value = previous?.Value;
-            if (string.IsNullOrWhiteSpace(value)) value = "0";
+            if (!int.TryParse(value, out var parsed) || parsed <= 0) value = string.Empty;
             EvictCosts.Add(new EvictCostItem
             {
                 Key = alias,
@@ -1388,7 +1395,7 @@ public partial class EvictCostItem : ObservableObject
 
     [ObservableProperty] private string _key = "";
     [ObservableProperty] private string _modelId = "";
-    [ObservableProperty] private string _value = "0";
+    [ObservableProperty] private string _value = "";
     [ObservableProperty] private string _priority = "Normal";
 
     public ICommand RemoveCommand { get; }
@@ -1409,8 +1416,8 @@ public partial class EvictCostItem : ObservableObject
     {
         Value = value switch
         {
-            "Keep longer" => "-100",
-            "Normal" => "0",
+            "Keep longer" => "1",
+            "Normal" => "",
             "Evict sooner" => "100",
             _ => Value
         };
@@ -1425,11 +1432,12 @@ public partial class EvictCostItem : ObservableObject
 
     public static string PriorityFromCost(string value)
     {
+        if (string.IsNullOrWhiteSpace(value)) return "Normal";
         if (!int.TryParse(value, out var cost)) return "Custom";
         return cost switch
         {
-            <= -50 => "Keep longer",
-            0 => "Normal",
+            <= 0 => "Custom",
+            <= 10 => "Keep longer",
             >= 100 => "Evict sooner",
             _ => "Custom"
         };
