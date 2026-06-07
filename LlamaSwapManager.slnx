@@ -1,0 +1,4 @@
+﻿<Solution>
+  <Project Path="LlamaSwapManager.Desktop/LlamaSwapManager.Desktop.csproj" />
+  <Project Path="LlamaSwapManager/LlamaSwapManager.csproj" />
+</Solution>

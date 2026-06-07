@@ -1,0 +1,589 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:LlamaSwapManager.ViewModels"
+        xmlns:models="using:LlamaSwapManager.Models"
+        xmlns:conv="using:LlamaSwapManager.Converters"
+        x:Class="LlamaSwapManager.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Llama Swap Manager"
+        Width="1200"
+        Height="800"
+        MinWidth="1000"
+        MinHeight="650"
+        WindowStartupLocation="CenterScreen">
+
+  <Design.DataContext>
+    <vm:MainViewModel />
+  </Design.DataContext>
+
+  <Panel>
+    <!-- Top bar -->
+    <Panel.ZIndex>1</Panel.ZIndex>
+    <Border Height="48" VerticalAlignment="Top" Background="#11111B" BorderBrush="#313244" BorderThickness="0,0,0,1">
+      <DockPanel Margin="16,0">
+        <TextBlock Text="Llama Swap Manager"
+                   FontSize="15"
+                   FontWeight="Bold"
+                   Foreground="#CDD6F4"
+                   VerticalAlignment="Center"
+                   DockPanel.Dock="Left" />
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Spacing="8">
+          <Ellipse Width="10" Height="10" Fill="{Binding StatusColor}" />
+          <TextBlock Text="{Binding StatusText}"
+                     FontSize="12"
+                     Foreground="{Binding StatusColor}"
+                     VerticalAlignment="Center" />
+          <Button Content="Start"
+                  Command="{Binding StartCommand}"
+                  Classes="success"
+                  Padding="10,4"
+                  IsEnabled="{Binding StartButtonEnabled}" />
+          <Button Content="Stop"
+                  Command="{Binding StopCommand}"
+                  Classes="danger"
+                  Padding="10,4"
+                  IsEnabled="{Binding StopButtonEnabled}" />
+          <Button Content="Restart"
+                  Command="{Binding RestartCommand}"
+                  Classes="warning"
+                  Padding="10,4"
+                  IsEnabled="{Binding RestartButtonEnabled}" />
+          <Button Content="Refresh"
+                  Command="{Binding RefreshCommand}"
+                  Padding="10,4" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- Main content with tabs -->
+    <TabControl Margin="0,48,0,0"
+                Background="#1E1E2E"
+                BorderBrush="#313244">
+
+      <!-- ===================== MODELS TAB ===================== -->
+        <TabItem Header="Models">
+          <Grid ColumnDefinitions="300,1*">
+            <!-- Left: Model list only -->
+            <Border Grid.Row="0" Grid.Column="0" Background="#181825" BorderBrush="#313244" BorderThickness="0,0,1,0">
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="12,8,12,8" Spacing="8">
+                  <TextBlock Text="Models" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                  <Button Content="+ Add Model"
+                          Command="{Binding AddModelCommand}"
+                          Classes="success"
+                          Padding="8,4"
+                          IsEnabled="{Binding CanAddModel}" />
+                </StackPanel>
+                <ScrollViewer DockPanel.Dock="Bottom" Margin="0,0,0,12" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel>
+                    <ItemsControl ItemsSource="{Binding Models}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ModelEditItem">
+                          <Border Padding="10,8" Margin="4,2" CornerRadius="4" BorderBrush="#313244" BorderThickness="1"
+                                  Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}"
+                                  PointerPressed="OnModelItemClick" Cursor="Hand">
+                            <StackPanel Spacing="3">
+                              <TextBlock Text="{Binding ModelId}" FontSize="13" FontWeight="Bold" Foreground="#CDD6F4" />
+                              <TextBlock Text="{Binding Name}" FontSize="11" Foreground="#A6ADC8" />
+                              <TextBlock Text="{Binding CmdPreview}" FontSize="10" Foreground="#6C7086" TextWrapping="Wrap" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+
+            <!-- Right: Model editor -->
+              <Grid Grid.Row="0" Grid.Column="1" RowDefinitions="*,Auto">
+                <!-- Scrollable form -->
+                <ScrollViewer Grid.Row="0" Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Spacing="16" Margin="0,0,0,96" IsVisible="{Binding HasSelectedModel}">
+                    <TextBlock Text="Edit Model" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
+
+                    <!-- Basic info -->
+                    <Border Padding="16" Background="#313244" CornerRadius="8">
+                      <StackPanel Spacing="12">
+                        <TextBlock Text="Basic Info" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                        <Grid ColumnDefinitions="160,*" RowSpacing="10">
+                          <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                          </Grid.RowDefinitions>
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Model ID" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ModelId}" PlaceholderText="e.g., mellum2-12b" />
+
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.Name}" PlaceholderText="e.g., Mellum 2 12B" />
+
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Description" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                          <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.Description}" PlaceholderText="Optional" />
+
+                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Aliases" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                          <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedModel.AliasesText}" PlaceholderText="mel, mellum (comma-separated)" />
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+
+                    <!-- Server config -->
+                    <Border Padding="16" Background="#313244" CornerRadius="8">
+                      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*">
+                        <StackPanel Grid.Row="0" Spacing="12">
+                          <TextBlock Text="llama-server" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Server Path" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.LlamaServerPath}" PlaceholderText="/path/to/llama-server" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Model Source" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                            <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                              <TextBox Grid.Column="0" Text="{Binding SelectedModelSourceLabel}" IsReadOnly="True" />
+                              <Button Grid.Column="1" Content="Choose model..." Click="OnChooseModelClick" Padding="12,5" />
+                            </Grid>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Host / Port" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                            <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,160" ColumnSpacing="10">
+                              <TextBox Grid.Column="0" Text="{Binding SelectedModel.Host}" PlaceholderText="127.0.0.1" />
+                              <TextBox Grid.Column="1" Text="{Binding SelectedModel.Port}" PlaceholderText="${PORT}" />
+                            </Grid>
+                          </Grid>
+                        </StackPanel>
+
+                      </Grid>
+                    </Border>
+
+                    <!-- Guided llama-server parameter slides -->
+                    <Border Padding="16" Background="#313244" CornerRadius="8">
+                      <StackPanel Spacing="12">
+                        <TextBlock Text="llama-server Parameters" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                        <TextBlock Text="Organized from the current llama.cpp server README. Use Advanced for any remaining raw flag not shown here." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+
+                        <TabControl Background="#313244" BorderBrush="#45475A">
+                          <TabItem Header="1. Runtime">
+                            <StackPanel Margin="12" Spacing="12">
+                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                              <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Context Size" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ContextSize}" PlaceholderText="0 = model default" ToolTip.Tip="--ctx-size / -c: prompt context size." />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Predict Tokens" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.Predict}" PlaceholderText="-1 = infinity" ToolTip.Tip="--predict: maximum generated tokens." />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Threads" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.Threads}" PlaceholderText="-1 = auto" ToolTip.Tip="--threads: CPU generation threads." />
+                              </Grid>
+                              <Expander Header="Advanced runtime / batching" IsExpanded="False">
+                                <Grid Margin="0,8,0,0" ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                  <TextBlock Grid.Row="0" Grid.Column="0" Text="Threads Batch" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ThreadsBatch}" PlaceholderText="same as threads" ToolTip.Tip="--threads-batch: CPU prompt/batch processing threads." />
+                                  <TextBlock Grid.Row="0" Grid.Column="2" Text="Batch Size" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.BatchSize}" PlaceholderText="2048" ToolTip.Tip="--batch-size: logical max batch size." />
+                                  <TextBlock Grid.Row="1" Grid.Column="0" Text="uBatch Size" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.UBatchSize}" PlaceholderText="512" ToolTip.Tip="--ubatch-size: physical micro-batch size." />
+                                </Grid>
+                              </Expander>
+                            </StackPanel>
+                          </TabItem>
+
+                          <TabItem Header="2. GPU / Memory">
+                            <StackPanel Margin="12" Spacing="12">
+                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                              <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="GPU Layers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" ToolTip.Tip="--gpu-layers / -ngl: auto, all, 0, or a numeric layer count." />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Flash Attention" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <ComboBox Grid.Row="0" Grid.Column="3" ItemsSource="{Binding AutoOnOffOptions}" SelectedItem="{Binding SelectedModel.FlashAttention}" ToolTip.Tip="--flash-attn: auto/on/off." />
+                                <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Spacing="24">
+                                  <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="--fit on" Foreground="#CDD6F4" ToolTip.Tip="Fit unset options into device memory." />
+                                  <CheckBox IsChecked="{Binding SelectedModel.NoMmap}" Content="--no-mmap" Foreground="#CDD6F4" ToolTip.Tip="Disable memory-mapped model loading." />
+                                </StackPanel>
+                              </Grid>
+                              <Expander Header="Advanced GPU placement / memory" IsExpanded="False">
+                                <Grid Margin="0,8,0,0" ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                  <TextBlock Grid.Row="0" Grid.Column="0" Text="Device" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Device}" PlaceholderText="CUDA0,Metal,none" ToolTip.Tip="--device: comma-separated devices; empty uses default." />
+                                  <TextBlock Grid.Row="0" Grid.Column="2" Text="Split Mode" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <ComboBox Grid.Row="0" Grid.Column="3" ItemsSource="{Binding SplitModeOptions}" SelectedItem="{Binding SelectedModel.SplitMode}" ToolTip.Tip="--split-mode: how to split model work across multiple GPUs." />
+                                  <TextBlock Grid.Row="1" Grid.Column="0" Text="Tensor Split" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.TensorSplit}" PlaceholderText="3,1" ToolTip.Tip="--tensor-split: GPU split proportions, e.g. 3,1." />
+                                  <TextBlock Grid.Row="1" Grid.Column="2" Text="Main GPU" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding SelectedModel.MainGpu}" PlaceholderText="0" ToolTip.Tip="--main-gpu: primary GPU index." />
+                                  <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4" IsChecked="{Binding SelectedModel.Mlock}" Content="--mlock (keep model in RAM)" Foreground="#CDD6F4" />
+                                </Grid>
+                              </Expander>
+                            </StackPanel>
+                          </TabItem>
+
+                          <TabItem Header="3. KV / Cache">
+                            <StackPanel Margin="12" Spacing="12">
+                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                              <TextBlock Text="Leave empty for llama.cpp defaults. Use q8/q4 cache types to save memory when quality/performance tradeoffs are acceptable." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                              <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Cache Type K" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeK}" ToolTip.Tip="--cache-type-k: KV cache K datatype." />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Cache Type V" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <ComboBox Grid.Row="0" Grid.Column="3" ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeV}" ToolTip.Tip="--cache-type-v: KV cache V datatype." />
+                              </Grid>
+                              <Expander Header="Advanced cache flags" IsExpanded="False">
+                                <TextBlock Margin="0,8,0,0" Text="Additional cache flags such as --kv-unified, --cache-ram, --cache-reuse, --cache-prompt can be added in the Advanced raw flags tab." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                              </Expander>
+                            </StackPanel>
+                          </TabItem>
+
+                          <TabItem Header="4. Sampling">
+                            <StackPanel Margin="12" Spacing="12">
+                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                              <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Temperature" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Temperature}" PlaceholderText="0.8" ToolTip.Tip="--temp: sampling randomness." />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Top K" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.TopK}" PlaceholderText="40" ToolTip.Tip="--top-k: top-k sampling; 0 disables." />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Top P" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.TopP}" PlaceholderText="0.95" ToolTip.Tip="--top-p: nucleus sampling; 1 disables." />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Min P" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding SelectedModel.MinP}" PlaceholderText="0.05" ToolTip.Tip="--min-p: minimum probability sampling." />
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Repeat Penalty" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.RepeatPenalty}" PlaceholderText="1.0" ToolTip.Tip="--repeat-penalty: 1.0 disables." />
+                              </Grid>
+                              <Expander Header="Advanced sampling" IsExpanded="False">
+                                <StackPanel Margin="0,8,0,0" Spacing="10">
+                                  <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Presence Penalty" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.PresencePenalty}" PlaceholderText="0" ToolTip.Tip="--presence-penalty: 0 disables." />
+                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="Frequency Penalty" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.FrequencyPenalty}" PlaceholderText="0" ToolTip.Tip="--frequency-penalty: 0 disables." />
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Repeat Last N" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.RepeatLastN}" PlaceholderText="64" ToolTip.Tip="--repeat-last-n: tokens considered for repetition penalty." />
+                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="Seed" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding SelectedModel.Seed}" PlaceholderText="-1 random" />
+                                  </Grid>
+                                  <Grid ColumnDefinitions="160,*" RowSpacing="10">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Samplers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                    <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CommonSamplersOptions}" SelectedItem="{Binding SelectedModel.Samplers}" IsEditable="True" ToolTip.Tip="--samplers: order separated by semicolons. Editable." />
+                                  </Grid>
+                                </StackPanel>
+                              </Expander>
+                            </StackPanel>
+                          </TabItem>
+
+                          <TabItem Header="5. Server / API">
+                            <StackPanel Margin="12" Spacing="12">
+                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                              <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Parallel Slots" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Parallel}" PlaceholderText="-1 = auto" ToolTip.Tip="--parallel: number of server slots." />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Timeout" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.Timeout}" PlaceholderText="3600" ToolTip.Tip="--timeout: server read/write timeout seconds." />
+                                <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Spacing="18">
+                                  <CheckBox IsChecked="{Binding SelectedModel.ContBatching}" Content="continuous batching" Foreground="#CDD6F4" />
+                                  <CheckBox IsChecked="{Binding SelectedModel.Slots}" Content="slots endpoint" Foreground="#CDD6F4" />
+                                </StackPanel>
+                              </Grid>
+                              <Expander Header="Advanced endpoints / auth" IsExpanded="False">
+                                <Grid Margin="0,8,0,0" ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
+                                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                  <TextBlock Grid.Row="0" Grid.Column="0" Text="HTTP Threads" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ThreadsHttp}" PlaceholderText="-1" ToolTip.Tip="--threads-http: HTTP request threads." />
+                                  <TextBlock Grid.Row="0" Grid.Column="2" Text="API Key" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.ApiKey}" PasswordChar="*" PlaceholderText="optional" />
+                                  <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Spacing="18">
+                                    <CheckBox IsChecked="{Binding SelectedModel.Embeddings}" Content="embeddings" Foreground="#CDD6F4" />
+                                    <CheckBox IsChecked="{Binding SelectedModel.Reranking}" Content="reranking" Foreground="#CDD6F4" />
+                                    <CheckBox IsChecked="{Binding SelectedModel.Metrics}" Content="metrics" Foreground="#CDD6F4" />
+                                    <CheckBox IsChecked="{Binding SelectedModel.PropsEndpoint}" Content="props" Foreground="#CDD6F4" />
+                                  </StackPanel>
+                                </Grid>
+                              </Expander>
+                            </StackPanel>
+                          </TabItem>
+
+                          <TabItem Header="6. Chat">
+                            <StackPanel Margin="12" Spacing="12">
+                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                              <StackPanel Orientation="Horizontal" Spacing="24">
+                                <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="--jinja" Foreground="#CDD6F4" />
+                                <TextBlock Text="Reasoning" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                <ComboBox Width="180" ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" ToolTip.Tip="--reasoning: auto/on/off thinking behavior." />
+                              </StackPanel>
+                              <Expander Header="Advanced chat template / reasoning" IsExpanded="False">
+                                <Grid Margin="0,8,0,0" ColumnDefinitions="160,*" RowSpacing="10">
+                                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                  <TextBlock Grid.Row="0" Grid.Column="0" Text="Chat Template" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ChatTemplate}" PlaceholderText="optional Jinja template name/string" />
+                                  <TextBlock Grid.Row="1" Grid.Column="0" Text="Reasoning Format" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ReasoningFormatOptions}" SelectedItem="{Binding SelectedModel.ReasoningFormat}" ToolTip.Tip="--reasoning-format: parser/output mode for thought tags." />
+                                  <TextBlock Grid.Row="2" Grid.Column="0" Text="Reasoning Budget" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.ReasoningBudget}" PlaceholderText="-1 / 0 / N" ToolTip.Tip="--reasoning-budget: -1 unlimited, 0 no thinking, N token budget." />
+                                </Grid>
+                              </Expander>
+                            </StackPanel>
+                          </TabItem>
+
+                          <TabItem Header="7. Advanced">
+                            <StackPanel Margin="12" Spacing="10">
+                              <TextBlock Text="Raw llama-server flags not represented in the guided slides. These are appended exactly as typed." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                              <TextBox Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True" MinHeight="110" TextWrapping="Wrap" PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf --lora adapter.gguf" />
+                            </StackPanel>
+                          </TabItem>
+                        </TabControl>
+                      </StackPanel>
+                    </Border>
+
+                    <!-- TTL -->
+                    <Border Padding="16" Background="#313244" CornerRadius="8">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="llama-swap TTL (auto-unload)" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                        <Grid ColumnDefinitions="160,*" RowSpacing="10">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="TTL seconds" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never" HorizontalAlignment="Left" Width="160" />
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </ScrollViewer>
+
+                <!-- Fixed buttons at bottom -->
+                <Border Grid.Row="1" MinHeight="72" Padding="16,12" Background="#1E1E2E" BorderBrush="#313244" BorderThickness="0,1,0,0">
+                  <Grid ColumnDefinitions="*,120,120,120" ColumnSpacing="10" IsVisible="{Binding HasSelectedModel}">
+                    <TextBlock Grid.Column="0" Text="Model actions" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Save"
+                            Command="{Binding SaveModelCommand}"
+                            Classes="success"
+                            HorizontalAlignment="Stretch"
+                            Padding="14,8" />
+                    <Button Grid.Column="2" Content="Cancel"
+                            Command="{Binding CancelModelCommand}"
+                            Classes="warning"
+                            HorizontalAlignment="Stretch"
+                            Padding="14,8"
+                            IsVisible="{Binding IsNewModel}" />
+                    <Button Grid.Column="3" Content="Delete"
+                            Click="OnDeleteModelClick"
+                            Classes="danger"
+                            HorizontalAlignment="Stretch"
+                            Padding="14,8"
+                            IsVisible="{Binding HasSelectedModel}" />
+                  </Grid>
+                </Border>
+              </Grid>
+        </Grid>
+      </TabItem>
+
+      <!-- ===================== MATRIX TAB ===================== -->
+      <TabItem Header="Matrix">
+        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="16">
+            <TextBlock Text="Matrix Configuration" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
+            <Border Padding="16" Background="#11111B" BorderBrush="#313244" BorderThickness="1" CornerRadius="10">
+              <StackPanel Spacing="10">
+                <TextBlock Text="Definitive visual Matrix builder" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                <TextBlock Text="Matrix defines which models can stay loaded together. Create one combination per workflow, then check the models that should be allowed to run at the same time. The app generates vars and sets automatically."
+                           FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Button Content="+ Add Combination" Command="{Binding AddMatrixCombinationCommand}" Classes="success" Padding="12,6" />
+                  <Button Content="Create 'all' Combination" Command="{Binding CreateAllModelsMatrixSetCommand}" Padding="12,6" />
+                  <Button Content="Save Matrix to config.yml" Command="{Binding SaveAndPreviewCommand}" Classes="success" Padding="12,6" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <ItemsControl ItemsSource="{Binding MatrixCombinations}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:MatrixCombinationItem">
+                  <Border Padding="16" Margin="0,0,0,12" Background="#313244" CornerRadius="8">
+                    <StackPanel Spacing="12">
+                      <Grid ColumnDefinitions="160,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="Combination name" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                        <TextBox Grid.Column="1" Text="{Binding Name}" PlaceholderText="coding_with_embeddings" LostFocus="OnMatrixVisualChanged" />
+                        <Button Grid.Column="2" Content="Remove" Command="{Binding RemoveCommand}" Click="OnMatrixVisualChanged" Classes="danger" Padding="10,5" />
+                      </Grid>
+                      <TextBlock Text="Models in this combination" FontSize="12" Foreground="#B4BEFE" FontWeight="Bold" />
+                      <ItemsControl ItemsSource="{Binding Models}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:MatrixModelSelectionItem">
+                            <CheckBox IsChecked="{Binding IsSelected}" Margin="0,0,0,6" Click="OnMatrixVisualChanged">
+                              <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Alias}" Foreground="#89B4FA" FontWeight="Bold" />
+                                <TextBlock Text="→" Foreground="#6C7086" />
+                                <TextBlock Text="{Binding ModelId}" Foreground="#CDD6F4" />
+                              </StackPanel>
+                            </CheckBox>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Expander Header="Generated low-level config (advanced)" IsExpanded="False">
+              <Border Padding="16" Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="8">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="Only edit this if you know llama-swap matrix syntax. The visual builder above is the source of truth when saving." FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" />
+                  <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="16">
+                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="6">
+                      <TextBlock Text="Vars" Foreground="#A6ADC8" />
+                      <TextBox Text="{Binding MatrixVarsText}" AcceptsReturn="True" Height="120" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="6">
+                      <TextBlock Text="Sets" Foreground="#A6ADC8" />
+                      <TextBox Text="{Binding MatrixSetsText}" AcceptsReturn="True" Height="120" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="0" Spacing="6">
+                      <TextBlock Text="Evict costs" Foreground="#A6ADC8" />
+                      <TextBox Text="{Binding EvictCostsText}" AcceptsReturn="True" Height="90" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </Border>
+            </Expander>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- ===================== CONFIG PREVIEW TAB ===================== -->
+      <TabItem Header="Config Preview">
+        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="16">
+            <TextBlock Text="Generated config.yml" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
+            <TextBlock Text="Live preview of the config file. Click 'Save' to write it to disk."
+                       FontSize="12" Foreground="#A6ADC8" />
+            <Border Padding="16" Background="#11111B" CornerRadius="8" BorderBrush="#313244" BorderThickness="1">
+              <TextBox Text="{Binding ConfigPreview}"
+                       IsReadOnly="True"
+                       TextWrapping="Wrap"
+                       FontFamily="Consolas, monospace"
+                       FontSize="12"
+                       Foreground="#A6E3A1"
+                       AcceptsReturn="True"
+                       Height="450" />
+            </Border>
+            <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+              <Button Content="Save to Disk"
+                      Command="{Binding SaveAndPreviewCommand}"
+                      Classes="success"
+                      Padding="20,10" />
+              <Button Content="Reload from Disk"
+                      Command="{Binding LoadConfigCommand}"
+                      Padding="20,10" />
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- ===================== LOGS TAB ===================== -->
+      <TabItem Header="Logs">
+        <Grid Margin="20" RowDefinitions="Auto,*">
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Margin="0,0,0,12">
+            <TextBlock Text="Logs are split by source. If llama-swap was started outside this app, stdout may not be attachable; API/status logs still appear here." FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" />
+            <Button Content="Clear" Command="{Binding ClearLogCommand}" Padding="10,4" />
+          </StackPanel>
+          <TabControl Grid.Row="1">
+            <TabItem Header="All">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"><TextBox IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas, monospace" FontSize="11" Foreground="#CDD6F4" AcceptsReturn="True" Text="{Binding LogText}" /></ScrollViewer>
+            </TabItem>
+            <TabItem Header="llama-swap">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"><TextBox IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas, monospace" FontSize="11" Foreground="#CDD6F4" AcceptsReturn="True" Text="{Binding LlamaSwapLogText}" /></ScrollViewer>
+            </TabItem>
+            <TabItem Header="model / llama-server">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"><TextBox IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas, monospace" FontSize="11" Foreground="#CDD6F4" AcceptsReturn="True" Text="{Binding ModelLogText}" /></ScrollViewer>
+            </TabItem>
+          </TabControl>
+        </Grid>
+      </TabItem>
+
+      <!-- ===================== SETTINGS TAB ===================== -->
+      <TabItem Header="Settings">
+        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="16">
+            <!-- Paths -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="12">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="Paths" FontSize="15" FontWeight="Bold" Foreground="#B4BEFE" />
+                  <TextBlock Text="(auto-detected)" FontSize="11" Foreground="#6C7086" />
+                </StackPanel>
+                <Grid ColumnDefinitions="200,*" RowSpacing="10">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="llama-swap Exe" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                    <Ellipse Width="8" Height="8" Fill="{Binding LlamaSwapExeAutoDetected, Converter={x:Static conv:BooleanToBrushConverter.Instance}}" IsVisible="{Binding LlamaSwapExeAutoDetected}" />
+                  </StackPanel>
+                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LlamaSwapExePath}" PlaceholderText="/path/to/llama-swap" />
+
+                  <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="Config File" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                    <Ellipse Width="8" Height="8" Fill="#A6E3A1" IsVisible="{Binding ConfigFileAutoDetected}" />
+                  </StackPanel>
+                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ConfigFilePath}" PlaceholderText="/path/to/config.yml" />
+
+                  <TextBlock Grid.Row="2" Grid.Column="0" Text="llama-server Default" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LlamaServerPath}" PlaceholderText="/path/to/llama-server" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- General -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="12">
+                <TextBlock Text="General" FontSize="15" FontWeight="Bold" Foreground="#B4BEFE" />
+                <Grid ColumnDefinitions="200,*" RowSpacing="10">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="Start Port (${PORT})" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="10"><TextBox Text="{Binding StartPort}" Width="100" /><TextBlock Text="First upstream llama-server port used by ${PORT}. Do not set this to 8080; llama-swap proxy/API is usually 8080." FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" /></StackPanel>
+
+                  <TextBlock Grid.Row="1" Grid.Column="0" Text="Health Check Timeout (s)" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HealthCheckTimeout}" Width="100" />
+
+                  <TextBlock Grid.Row="2" Grid.Column="0" Text="Log Level" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LogLevel}" Width="150" PlaceholderText="debug" />
+
+                  <TextBlock Grid.Row="3" Grid.Column="0" Text="Global TTL (s)" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding GlobalTtl}" Width="100" />
+
+                  <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Send Loading State" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                    <CheckBox IsChecked="{Binding SendLoadingState}" Content="Inject loading updates into streaming responses while a model is loading" Foreground="#CDD6F4" />
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- Info -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Tips" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                <TextBlock Text="• The Matrix tab uses &amp; syntax (e.g. 'q &amp; e') to load multiple models together" FontSize="11" Foreground="#A6ADC8" />
+                <TextBlock Text="• Vars map short names (q, m, d, t, e) to full model IDs" FontSize="11" Foreground="#A6ADC8" />
+                <TextBlock Text="• Sets define named combinations of models (e.g. 'agente_full = q &amp; e')" FontSize="11" Foreground="#A6ADC8" />
+                <TextBlock Text="• Evict Costs control which model gets unloaded first under memory pressure" FontSize="11" Foreground="#A6ADC8" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+  </Panel>
+</Window>

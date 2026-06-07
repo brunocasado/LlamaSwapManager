@@ -1,0 +1,12 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:LlamaSwapManager.Converters"
+             x:Class="LlamaSwapManager.App">
+    <Application.Resources>
+        <conv:BoolToColorConverter x:Key="BoolToColorConverter" TrueColor="#45475A" FalseColor="Transparent" />
+        <conv:BoolToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Application.Resources>
+    <Application.Styles>
+        <FluentTheme />
+    </Application.Styles>
+</Application>
