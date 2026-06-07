@@ -418,6 +418,13 @@ public partial class MainViewModel : ObservableObject
         OnLogMessage($"[ui] {message}");
     }
 
+    public void ReportUiInfo(string message)
+    {
+        StatusText = message;
+        StatusColor = "#A6E3A1";
+        OnLogMessage($"[ui] {message}");
+    }
+
     public void ExecuteSelectModel(ModelEditItem model)
        {
            if (model == null) return;

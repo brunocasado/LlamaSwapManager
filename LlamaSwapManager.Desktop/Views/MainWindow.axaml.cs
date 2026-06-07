@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
@@ -17,6 +18,86 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    private static bool IsCopyGesture(KeyEventArgs e)
+        => e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control);
+
+    private static bool IsPasteGesture(KeyEventArgs e)
+        => e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control);
+
+    private void OnExtraArgsGotFocus(object? sender, RoutedEventArgs e)
+    {
+        // Keep an explicit focus hook so the Advanced text editor owns Ctrl+C/Ctrl+V
+        // on Windows instead of a previously focused ComboBox/TextBlock.
+    }
+
+    private async void OnExtraArgsKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox)
+            return;
+
+        if (IsCopyGesture(e))
+        {
+            e.Handled = true;
+            await CopyExtraArgsTextAsync(textBox);
+        }
+        else if (IsPasteGesture(e))
+        {
+            e.Handled = true;
+            await PasteExtraArgsTextAsync(textBox);
+        }
+    }
+
+    private async void OnCopyExtraArgsClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        await CopyExtraArgsTextAsync(ExtraArgsTextBox);
+    }
+
+    private async void OnPasteExtraArgsClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        await PasteExtraArgsTextAsync(ExtraArgsTextBox);
+    }
+
+    private async System.Threading.Tasks.Task CopyExtraArgsTextAsync(TextBox? textBox)
+    {
+        try
+        {
+            if (textBox is null) return;
+            var text = !string.IsNullOrEmpty(textBox.SelectedText) ? textBox.SelectedText : textBox.Text;
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard is null) return;
+            await clipboard.SetValueAsync(DataFormat.Text, text ?? string.Empty);
+            if (DataContext is MainViewModel vm) vm.ReportUiInfo("Extra args copied.");
+        }
+        catch (Exception ex)
+        {
+            if (DataContext is MainViewModel vm) vm.ReportUiError($"Copy failed: {ex.Message}");
+        }
+    }
+
+    private async System.Threading.Tasks.Task PasteExtraArgsTextAsync(TextBox? textBox)
+    {
+        try
+        {
+            if (textBox is null) return;
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard is null) return;
+            var text = await clipboard.TryGetTextAsync();
+            if (text is null) return;
+
+            textBox.Text = text;
+            if (DataContext is MainViewModel vm && vm.SelectedModel is not null)
+                vm.SelectedModel.ExtraArgs = text;
+            textBox.Focus();
+            if (DataContext is MainViewModel vm2) vm2.ReportUiInfo("Extra args pasted.");
+        }
+        catch (Exception ex)
+        {
+            if (DataContext is MainViewModel vm) vm.ReportUiError($"Paste failed: {ex.Message}");
+        }
     }
 
     private void OnModelItemClick(object? sender, RoutedEventArgs e)

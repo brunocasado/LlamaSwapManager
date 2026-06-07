@@ -341,8 +341,19 @@
 
                           <TabItem Header="7. Advanced">
                             <StackPanel Margin="12" Spacing="10">
-                              <TextBlock Text="Raw llama-server flags." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
-                              <TextBox Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True" MinHeight="110" TextWrapping="Wrap" PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf --lora adapter.gguf" />
+                              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                <TextBlock Grid.Column="0" Text="Raw llama-server flags." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="Copy" Click="OnCopyExtraArgsClick" ToolTip.Tip="Copy only these raw flags." />
+                                <Button Grid.Column="2" Content="Paste" Click="OnPasteExtraArgsClick" ToolTip.Tip="Paste into these raw flags." />
+                              </Grid>
+                              <TextBox Name="ExtraArgsTextBox"
+                                       Text="{Binding SelectedModel.ExtraArgs}"
+                                       AcceptsReturn="True"
+                                       MinHeight="110"
+                                       TextWrapping="Wrap"
+                                       KeyDown="OnExtraArgsKeyDown"
+                                       GotFocus="OnExtraArgsGotFocus"
+                                       PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf --lora adapter.gguf" />
                             </StackPanel>
                           </TabItem>
                         </TabControl>
