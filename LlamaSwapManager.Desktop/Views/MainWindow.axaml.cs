@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AddHandler(KeyDownEvent, OnWindowKeyDownTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
     }
 
     private static bool IsCopyGesture(KeyEventArgs e)
@@ -30,6 +31,23 @@ public partial class MainWindow : Window
     {
         // Keep an explicit focus hook so the Advanced text editor owns Ctrl+C/Ctrl+V
         // on Windows instead of a previously focused ComboBox/TextBlock.
+    }
+
+    private async void OnWindowKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        if (ExtraArgsTextBox is null || !ExtraArgsTextBox.IsKeyboardFocusWithin)
+            return;
+
+        if (IsCopyGesture(e))
+        {
+            e.Handled = true;
+            await CopyExtraArgsTextAsync(ExtraArgsTextBox);
+        }
+        else if (IsPasteGesture(e))
+        {
+            e.Handled = true;
+            await PasteExtraArgsTextAsync(ExtraArgsTextBox);
+        }
     }
 
     private async void OnExtraArgsKeyDown(object? sender, KeyEventArgs e)

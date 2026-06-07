@@ -9,6 +9,7 @@ sealed class Program
     private static readonly string MutexName = "Global\\LlamaSwapManager.SingleInstance";
     private static Mutex? _mutex;
 
+    [STAThread]
     static void Main(string[] args)
     {
         CrashLogger.Install();
