@@ -171,7 +171,7 @@
                     <Border Padding="16" Background="#313244" CornerRadius="8">
                       <StackPanel Spacing="12">
                         <TextBlock Text="llama-server Parameters" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                        <TextBlock Text="Organized from the current llama.cpp server README. Use Advanced for any remaining raw flag not shown here." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                        <TextBlock Text="Tune runtime, memory, sampling, API, and chat options." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
 
                         <TabControl Background="#313244" BorderBrush="#45475A">
                           <TabItem Header="1. Runtime">
@@ -234,7 +234,7 @@
                           <TabItem Header="3. KV / Cache">
                             <StackPanel Margin="12" Spacing="12">
                               <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
-                              <TextBlock Text="Leave empty for llama.cpp defaults. Use q8/q4 cache types to save memory when quality/performance tradeoffs are acceptable." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                              <TextBlock Text="Leave empty for defaults." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
                               <Grid ColumnDefinitions="160,180,160,180" RowSpacing="10" ColumnSpacing="12">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Cache Type K" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
                                 <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeK}" ToolTip.Tip="--cache-type-k: KV cache K datatype." />
@@ -242,7 +242,7 @@
                                 <ComboBox Grid.Row="0" Grid.Column="3" ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeV}" ToolTip.Tip="--cache-type-v: KV cache V datatype." />
                               </Grid>
                               <Expander Header="Advanced cache flags" IsExpanded="False">
-                                <TextBlock Margin="0,8,0,0" Text="Additional cache flags such as --kv-unified, --cache-ram, --cache-reuse, --cache-prompt can be added in the Advanced raw flags tab." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                                <TextBlock Margin="0,8,0,0" Text="Other cache flags go in Advanced." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
                               </Expander>
                             </StackPanel>
                           </TabItem>
@@ -341,7 +341,7 @@
 
                           <TabItem Header="7. Advanced">
                             <StackPanel Margin="12" Spacing="10">
-                              <TextBlock Text="Raw llama-server flags not represented in the guided slides. These are appended exactly as typed." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                              <TextBlock Text="Raw llama-server flags." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
                               <TextBox Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True" MinHeight="110" TextWrapping="Wrap" PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf --lora adapter.gguf" />
                             </StackPanel>
                           </TabItem>
@@ -365,7 +365,6 @@
                 <!-- Fixed buttons at bottom -->
                 <Border Grid.Row="1" MinHeight="72" Padding="16,12" Background="#1E1E2E" BorderBrush="#313244" BorderThickness="0,1,0,0">
                   <Grid ColumnDefinitions="*,120,120,120" ColumnSpacing="10" IsVisible="{Binding HasSelectedModel}">
-                    <TextBlock Grid.Column="0" Text="Model actions" Foreground="#6C7086" VerticalAlignment="Center" />
                     <Button Grid.Column="1" Content="Save"
                             Command="{Binding SaveModelCommand}"
                             Classes="success"
@@ -398,7 +397,7 @@
             <Border Padding="16" Background="#11111B" BorderBrush="#313244" BorderThickness="1" CornerRadius="10">
               <StackPanel Spacing="10">
                 <TextBlock Text="Definitive visual Matrix builder" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                <TextBlock Text="Matrix defines which models can stay loaded together. Create one combination per workflow, then check the models that should be allowed to run at the same time. The app generates vars and sets automatically."
+                <TextBlock Text="Create combinations of models that can stay loaded together."
                            FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
                   <Button Content="+ Add Combination" Command="{Binding AddMatrixCombinationCommand}" Classes="success" Padding="12,6" />
@@ -409,7 +408,7 @@
             </Border>
           </StackPanel>
 
-          <!-- Scroll only combinations. This prevents the advanced config panel from being pushed out/overlapped. -->
+          <!-- Scroll only combinations -->
           <Border Grid.Row="1" Background="#1E1E2E" ClipToBounds="True">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,12">
               <ItemsControl ItemsSource="{Binding MatrixCombinations}">
@@ -444,12 +443,12 @@
             </ScrollViewer>
           </Border>
 
-          <!-- Fixed bottom advanced low-level config. It no longer participates in the combinations scroll. -->
+          <!-- Fixed bottom advanced config -->
           <Border Grid.Row="2" Padding="0,12,0,0" Background="#1E1E2E" BorderBrush="#313244" BorderThickness="0,1,0,0">
-            <Expander Header="Generated low-level config (advanced)" IsExpanded="False" HorizontalAlignment="Stretch">
+            <Expander Header="Advanced matrix YAML" IsExpanded="False" HorizontalAlignment="Stretch">
               <Border Padding="16" Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="8" Margin="0,8,0,0">
                 <StackPanel Spacing="10">
-                  <TextBlock Text="Only edit this if you know llama-swap matrix syntax. The visual builder above is the source of truth when saving." FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" />
+                  <TextBlock Text="Raw vars, sets, and evict costs." FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" />
                   <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="16">
                     <StackPanel Grid.Row="0" Grid.Column="0" Spacing="6">
                       <TextBlock Text="Vars" Foreground="#A6ADC8" />
@@ -476,7 +475,7 @@
         <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="16">
             <TextBlock Text="Generated config.yml" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
-            <TextBlock Text="Live preview of the config file. Click 'Save' to write it to disk."
+            <TextBlock Text="Preview before saving."
                        FontSize="12" Foreground="#A6ADC8" />
             <Border Padding="16" Background="#11111B" CornerRadius="8" BorderBrush="#313244" BorderThickness="1">
               <TextBox Text="{Binding ConfigPreview}"
@@ -505,7 +504,7 @@
       <TabItem Header="Logs">
         <Grid Margin="20" RowDefinitions="Auto,*">
           <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Margin="0,0,0,12">
-            <TextBlock Text="Logs are split by source. If llama-swap was started outside this app, stdout may not be attachable; API/status logs still appear here." FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" />
+            <TextBlock Text="Runtime logs" FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" />
             <Button Content="Clear" Command="{Binding ClearLogCommand}" Padding="10,4" />
           </StackPanel>
           <TabControl Grid.Row="1">
@@ -570,7 +569,7 @@
                     <RowDefinition Height="Auto"/>
                   </Grid.RowDefinitions>
                   <TextBlock Grid.Row="0" Grid.Column="0" Text="Start Port (${PORT})" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="10"><TextBox Text="{Binding StartPort}" Width="100" /><TextBlock Text="First upstream llama-server port used by ${PORT}. Do not set this to 8080; llama-swap proxy/API is usually 8080." FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" /></StackPanel>
+                  <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="10"><TextBox Text="{Binding StartPort}" Width="100" /><TextBlock Text="First llama-server port for ${PORT}." FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" /></StackPanel>
 
                   <TextBlock Grid.Row="1" Grid.Column="0" Text="Health Check Timeout (s)" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
                   <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HealthCheckTimeout}" Width="100" />
@@ -593,10 +592,10 @@
             <Border Padding="16" Background="#313244" CornerRadius="8">
               <StackPanel Spacing="8">
                 <TextBlock Text="Tips" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                <TextBlock Text="• The Matrix tab uses &amp; syntax (e.g. 'q &amp; e') to load multiple models together" FontSize="11" Foreground="#A6ADC8" />
+                <TextBlock Text="• Matrix uses &amp; for models loaded together" FontSize="11" Foreground="#A6ADC8" />
                 <TextBlock Text="• Vars map short names (q, m, d, t, e) to full model IDs" FontSize="11" Foreground="#A6ADC8" />
-                <TextBlock Text="• Sets define named combinations of models (e.g. 'agente_full = q &amp; e')" FontSize="11" Foreground="#A6ADC8" />
-                <TextBlock Text="• Evict Costs control which model gets unloaded first under memory pressure" FontSize="11" Foreground="#A6ADC8" />
+                <TextBlock Text="• Sets define named combinations" FontSize="11" Foreground="#A6ADC8" />
+                <TextBlock Text="• Evict costs control unload priority" FontSize="11" Foreground="#A6ADC8" />
               </StackPanel>
             </Border>
           </StackPanel>
