@@ -109,11 +109,24 @@ public partial class MainWindow : Window
             var text = await clipboard.TryGetTextAsync();
             if (text is null) return;
 
-            textBox.Text = text;
+            var current = textBox.Text ?? string.Empty;
+            var selectionStart = Math.Min(textBox.SelectionStart, current.Length);
+            var selectionEnd = Math.Min(textBox.SelectionEnd, current.Length);
+            var start = Math.Min(selectionStart, selectionEnd);
+            var end = Math.Max(selectionStart, selectionEnd);
+
+            var updated = current[..start] + text + current[end..];
+            var caret = start + text.Length;
+
+            textBox.Text = updated;
+            textBox.CaretIndex = caret;
+            textBox.SelectionStart = caret;
+            textBox.SelectionEnd = caret;
+
             if (DataContext is MainViewModel vm && vm.SelectedModel is not null)
-                vm.SelectedModel.ExtraArgs = text;
+                vm.SelectedModel.ExtraArgs = updated;
             textBox.Focus();
-            LlamaSwapManager.Desktop.CrashLogger.Log("clipboard.paste.end", $"length={text.Length}");
+            LlamaSwapManager.Desktop.CrashLogger.Log("clipboard.paste.end", $"insertedLength={text.Length}; totalLength={updated.Length}");
             if (DataContext is MainViewModel vm2) vm2.ReportUiInfo("Extra args pasted.");
         }
         catch (Exception ex)
