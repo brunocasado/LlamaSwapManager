@@ -94,8 +94,11 @@ public class LlamaSwapProcessManager : IDisposable
     {
         var candidates = new[]
         {
-            Path.Combine(AppDirectory, "config.yml"),
-            Path.Combine(UserDirectory, "config.yml")
+            // Prefer the real user config. The build output may contain a stale
+            // bundled config.yml; using it makes edits appear in preview but vanish
+            // after restart because llama-swap/user config remains unchanged.
+            Path.Combine(UserDirectory, "config.yml"),
+            Path.Combine(AppDirectory, "config.yml")
         };
 
         foreach (var candidate in candidates)

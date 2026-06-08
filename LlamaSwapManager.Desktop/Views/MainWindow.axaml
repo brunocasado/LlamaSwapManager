@@ -405,13 +405,10 @@
           <StackPanel Grid.Row="0" Spacing="12" Margin="0,0,0,12">
             <TextBlock Text="Matrix Configuration" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
             <Border Padding="16" Background="#11111B" BorderBrush="#313244" BorderThickness="1" CornerRadius="10">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Grid.Column="0" Spacing="6">
-                  <TextBlock Text="Model loading groups and eviction priority" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                  <TextBlock Text="Create combinations, then decide what unloads first." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
-                </StackPanel>
-                <Button Grid.Column="1" Content="Save Matrix to config.yml" Command="{Binding SaveAndPreviewCommand}" Classes="success" Padding="12,6" VerticalAlignment="Center" />
-              </Grid>
+              <StackPanel Spacing="6">
+                <TextBlock Text="Model loading groups and eviction priority" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                <TextBlock Text="Create combinations, then decide what unloads first. Matrix changes are saved automatically to config.yml." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+              </StackPanel>
             </Border>
           </StackPanel>
 
@@ -430,14 +427,14 @@
                           <StackPanel Spacing="12">
                             <Grid ColumnDefinitions="160,*,Auto" ColumnSpacing="10">
                               <TextBlock Grid.Column="0" Text="Combination name" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                              <TextBox Grid.Column="1" Text="{Binding Name}" PlaceholderText="coding_with_embeddings" LostFocus="OnMatrixVisualChanged" />
-                              <Button Grid.Column="2" Content="Remove" Command="{Binding RemoveCommand}" Click="OnMatrixVisualChanged" Classes="danger" Padding="10,5" />
+                              <TextBox Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="coding_with_embeddings" />
+                              <Button Grid.Column="2" Content="Remove" Command="{Binding RemoveCommand}" Classes="danger" Padding="10,5" />
                             </Grid>
                             <TextBlock Text="Models" FontSize="12" Foreground="#B4BEFE" FontWeight="Bold" />
                             <ItemsControl ItemsSource="{Binding Models}">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:MatrixModelSelectionItem">
-                                  <CheckBox IsChecked="{Binding IsSelected}" Margin="0,0,0,6" Click="OnMatrixVisualChanged">
+                                  <CheckBox IsChecked="{Binding IsSelected}" Margin="0,0,0,6">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                       <TextBlock Text="{Binding Alias}" Foreground="#89B4FA" FontWeight="Bold" />
                                       <TextBlock Text="→" Foreground="#6C7086" />
@@ -477,8 +474,13 @@
                             <Grid ColumnDefinitions="80,*,190,110" ColumnSpacing="12" Margin="0,4">
                               <TextBlock Grid.Column="0" Text="{Binding Key}" Foreground="#89B4FA" FontWeight="Bold" VerticalAlignment="Center" />
                               <TextBlock Grid.Column="1" Text="{Binding ModelId}" Foreground="#CDD6F4" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                              <ComboBox Grid.Column="2" ItemsSource="{Binding PriorityOptions}" SelectedItem="{Binding Priority}" />
-                              <TextBox Grid.Column="3" Text="{Binding Value}" PlaceholderText="cost" />
+                              <ComboBox Grid.Column="2" ItemsSource="{Binding PriorityOptions}" SelectedItem="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" />
+                              <TextBox Grid.Column="3"
+                                       Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                                       PlaceholderText="cost"
+                                       KeyDown="OnEvictCostKeyDown"
+                                       TextInput="OnEvictCostTextInput"
+                                       TextChanged="OnEvictCostTextChanged" />
                             </Grid>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -497,15 +499,15 @@
                     <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="16">
                       <StackPanel Grid.Row="0" Grid.Column="0" Spacing="6">
                         <TextBlock Text="Vars" Foreground="#A6ADC8" />
-                        <TextBox Text="{Binding MatrixVarsText}" AcceptsReturn="True" Height="140" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                        <TextBox Text="{Binding MatrixVarsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" Height="140" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
                       </StackPanel>
                       <StackPanel Grid.Row="0" Grid.Column="1" Spacing="6">
                         <TextBlock Text="Sets" Foreground="#A6ADC8" />
-                        <TextBox Text="{Binding MatrixSetsText}" AcceptsReturn="True" Height="140" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                        <TextBox Text="{Binding MatrixSetsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" Height="140" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
                       </StackPanel>
                       <StackPanel Grid.Row="1" Grid.Column="0" Spacing="6">
                         <TextBlock Text="Evict costs" Foreground="#A6ADC8" />
-                        <TextBox Text="{Binding EvictCostsText}" AcceptsReturn="True" Height="110" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                        <TextBox Text="{Binding EvictCostsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" Height="110" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
                       </StackPanel>
                     </Grid>
                   </StackPanel>

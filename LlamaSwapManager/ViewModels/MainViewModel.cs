@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -21,6 +23,8 @@ public partial class MainViewModel : ObservableObject
     private readonly ConfigService _configService;
     private readonly LlamaSwapProcessManager _processManager;
     private LlamaSwapConfig? _rawConfig;
+    private int _matrixSyncDepth;
+    private bool _isLoadingConfig;
 
     // Status
     [ObservableProperty] private string _statusText = "Status: checking...";
@@ -217,13 +221,18 @@ public partial class MainViewModel : ObservableObject
 
     private void ParseConfigToUI(LlamaSwapConfig config)
     {
+        _isLoadingConfig = true;
+        try
+        {
         // Parse models
         Models.Clear();
         if (config.Models != null)
         {
             foreach (var kvp in config.Models)
             {
-                Models.Add(ModelEditItem.Parse(kvp.Key, kvp.Value));
+                var model = ModelEditItem.Parse(kvp.Key, kvp.Value);
+                HookModelItem(model);
+                Models.Add(model);
             }
         }
 
@@ -236,15 +245,17 @@ public partial class MainViewModel : ObservableObject
         {
             if (config.Matrix.Vars != null)
                 foreach (var kvp in config.Matrix.Vars)
-                    MatrixVars.Add(new MatrixEntryItem { Key = kvp.Key, Value = kvp.Value, ParentCollection = MatrixVars });
+                    MatrixVars.Add(CreateMatrixEntryItem(kvp.Key, kvp.Value, MatrixVars));
 
             if (config.Matrix.Sets != null)
                 foreach (var kvp in config.Matrix.Sets)
-                    MatrixSets.Add(new MatrixEntryItem { Key = kvp.Key, Value = kvp.Value, ParentCollection = MatrixSets });
+                    MatrixSets.Add(CreateMatrixEntryItem(kvp.Key, kvp.Value, MatrixSets));
 
             if (config.Matrix.EvictCosts != null)
                  foreach (var kvp in config.Matrix.EvictCosts)
-                     EvictCosts.Add(new EvictCostItem { Key = kvp.Key, Value = kvp.Value.ToString() ?? "0", ParentCollection = EvictCosts });
+                 {
+                     EvictCosts.Add(CreateEvictCostItem(kvp.Key, "", kvp.Value.ToString() ?? "0"));
+                 }
         }
 
         // Parse settings
@@ -256,12 +267,17 @@ public partial class MainViewModel : ObservableObject
 
         SyncMatrixTextFromCollections();
         RebuildMatrixCombinationsFromSets();
-        SyncEvictCostsWithCurrentVars();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
 
-        // Generate config preview
-        ConfigPreview = config.ToYaml();
+        // Generate config preview from the same UI state that Save uses.
+        UpdateConfigPreviewFromCurrentState();
 
         UpdateUI();
+        }
+        finally
+        {
+            _isLoadingConfig = false;
+        }
     }
 
     private void OnProcessStatusChanged(LlamaSwapStatus newStatus)
@@ -459,11 +475,15 @@ public partial class MainViewModel : ObservableObject
         };
         foreach (var m in Models) m.IsSelected = false;
         newItem.IsSelected = true;
+        HookModelItem(newItem);
         Models.Add(newItem);
         SelectedModel = newItem;
         HasSelectedModel = true;
         IsNewModel = true;
         UpdateSelectedModelSourceLabel();
+        EnsureMatrixModelCoverage();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
+        UpdateConfigPreviewFromCurrentState();
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
 
@@ -487,11 +507,15 @@ public partial class MainViewModel : ObservableObject
 
         foreach (var m in Models) m.IsSelected = false;
         clone.IsSelected = true;
+        HookModelItem(clone);
         Models.Add(clone);
         SelectedModel = clone;
         HasSelectedModel = true;
         IsNewModel = true;
         UpdateSelectedModelSourceLabel();
+        EnsureMatrixModelCoverage();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
+        UpdateConfigPreviewFromCurrentState();
         StatusText = $"Cloned {source.ModelId}. Adjust parameters, then click Save.";
         StatusColor = "#A6E3A1";
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
@@ -509,6 +533,30 @@ public partial class MainViewModel : ObservableObject
         return candidate;
     }
 
+    private void HookModelItem(ModelEditItem model)
+    {
+        model.PropertyChanged -= OnModelItemPropertyChanged;
+        model.PropertyChanged += OnModelItemPropertyChanged;
+    }
+
+    private void OnModelItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_matrixSyncDepth > 0) return;
+        if (e.PropertyName is nameof(ModelEditItem.IsSelected) or nameof(ModelEditItem.IsNew)) return;
+
+        _matrixSyncDepth++;
+        try
+        {
+            if (e.PropertyName == nameof(ModelEditItem.ModelId))
+            {
+                EnsureMatrixModelCoverage();
+                SyncEvictCostsWithCurrentVars(refreshPreview: false);
+            }
+            UpdateConfigPreviewFromCurrentState();
+        }
+        finally { _matrixSyncDepth--; }
+    }
+
     private void ExecuteCancelModel()
     {
         if (SelectedModel == null) return;
@@ -523,6 +571,9 @@ public partial class MainViewModel : ObservableObject
             StatusText = "New model cancelled.";
             StatusColor = "#FAB387";
             UpdateSelectedModelSourceLabel();
+            EnsureMatrixModelCoverage();
+            SyncEvictCostsWithCurrentVars(refreshPreview: false);
+            UpdateConfigPreviewFromCurrentState();
             (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
             return;
         }
@@ -542,6 +593,19 @@ public partial class MainViewModel : ObservableObject
         HasSelectedModel = false;
         IsNewModel = false;
         UpdateSelectedModelSourceLabel();
+
+        // Remove deleted model from every existing combination, then rebuild YAML text.
+        foreach (var combo in MatrixCombinations)
+        {
+            var stale = combo.Models
+                .Where(m => string.Equals(m.ModelId, deletedId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var item in stale) combo.Models.Remove(item);
+        }
+
+        EnsureMatrixModelCoverage();
+        SyncMatrixTextFromCombinations();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
         PersistConfigToDisk($"Model {deletedId} deleted from config.yml.");
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
@@ -567,6 +631,8 @@ public partial class MainViewModel : ObservableObject
 
         SelectedModel.IsNew = false;
         IsNewModel = false;
+        EnsureMatrixModelCoverage();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
         PersistConfigToDisk("Model saved to config.yml!");
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
@@ -728,13 +794,9 @@ public partial class MainViewModel : ObservableObject
             config.Models[model.ModelId] = modelConfig;
         }
 
-        // Matrix
+        // Matrix state is maintained live by the UI sync handlers.
         SyncMatrixTextFromCombinations();
-        SyncEvictCostsWithCurrentVars();
-        // Do not call SyncMatrixCollectionsFromText() here: it rebuilds EvictCosts
-        // from raw "alias = cost" lines, which do not contain ModelId, and that
-        // makes the visual Eviction tab lose model descriptions whenever the
-        // preview/save path runs after checking/unchecking combinations.
+        
         var vars = ParseKeyValueLines(MatrixVarsText).ToDictionary(v => v.Key.Trim(), v => v.Value.Trim());
         var sets = ParseKeyValueLines(MatrixSetsText).ToDictionary(s => s.Key.Trim(), s => s.Value.Trim());
         var costs = EvictCosts
@@ -751,7 +813,6 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
-            // llama-swap rejects matrix with vars but no sets: "matrix must define at least one set".
             MatrixSetsText = string.Empty;
             config.Matrix = null;
         }
@@ -764,6 +825,74 @@ public partial class MainViewModel : ObservableObject
         config.SendLoadingState = SendLoadingState;
 
         return config;
+    }
+
+    /// <summary>
+    /// Syncs all matrix/eviction state and updates the config preview in real-time.
+    /// Call this from any property changed handler to keep the preview in sync.
+    /// </summary>
+    private void RefreshConfigPreview()
+    {
+        if (_matrixSyncDepth > 0) return;
+        _matrixSyncDepth++;
+        try
+        {
+            SyncMatrixTextFromCombinations();
+            SyncEvictCostsWithCurrentVars(refreshPreview: false);
+            UpdateConfigPreviewFromCurrentState();
+            AutoPersistMatrixToDisk();
+        }
+        finally
+        {
+            _matrixSyncDepth--;
+        }
+    }
+
+    private void UpdateConfigPreviewFromCurrentState()
+    {
+        ConfigPreview = BuildConfigFromUI().ToYaml();
+    }
+
+    private void AutoPersistMatrixToDisk()
+    {
+        if (_isLoadingConfig) return;
+        var configPath = !string.IsNullOrWhiteSpace(ConfigFilePath) ? ConfigFilePath : _processManager.ConfigPath;
+        if (string.IsNullOrWhiteSpace(configPath)) return;
+
+        try
+        {
+            var config = BuildConfigFromUI();
+            _configService.SaveConfig(config, configPath);
+            _rawConfig = config;
+            ConfigPreview = config.ToYaml();
+            StatusText = $"Matrix saved to {configPath}";
+            StatusColor = "#A6E3A1";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Matrix autosave failed: {ex.Message}";
+            StatusColor = "#F38BA8";
+        }
+    }
+
+    partial void OnMatrixVarsTextChanged(string value) => OnMatrixTextChanged();
+    partial void OnMatrixSetsTextChanged(string value) => OnMatrixTextChanged();
+    partial void OnEvictCostsTextChanged(string value) => OnMatrixTextChanged();
+
+    private void OnMatrixTextChanged()
+    {
+        if (_isLoadingConfig || _matrixSyncDepth > 0) return;
+        _matrixSyncDepth++;
+        try
+        {
+            SyncMatrixCollectionsFromText();
+            RebuildMatrixCombinationsFromSets();
+            EnsureMatrixModelCoverage();
+            SyncEvictCostsWithCurrentVars(refreshPreview: false);
+            UpdateConfigPreviewFromCurrentState();
+            AutoPersistMatrixToDisk();
+        }
+        finally { _matrixSyncDepth--; }
     }
 
     private void PersistConfigToDisk(string successMessage)
@@ -797,21 +926,39 @@ public partial class MainViewModel : ObservableObject
     {
         MatrixVars.Clear();
         foreach (var item in ParseKeyValueLines(MatrixVarsText))
-            MatrixVars.Add(new MatrixEntryItem { Key = item.Key, Value = item.Value, ParentCollection = MatrixVars });
+            MatrixVars.Add(CreateMatrixEntryItem(item.Key, item.Value, MatrixVars));
 
         MatrixSets.Clear();
         foreach (var item in ParseKeyValueLines(MatrixSetsText))
-            MatrixSets.Add(new MatrixEntryItem { Key = item.Key, Value = item.Value, ParentCollection = MatrixSets });
+            MatrixSets.Add(CreateMatrixEntryItem(item.Key, item.Value, MatrixSets));
 
         EvictCosts.Clear();
         foreach (var item in ParseKeyValueLines(EvictCostsText))
         {
             var value = int.TryParse(item.Value, out var parsed) && parsed > 0 ? item.Value : string.Empty;
-            EvictCosts.Add(new EvictCostItem { Key = item.Key, Value = value, ParentCollection = EvictCosts });
+            EvictCosts.Add(CreateEvictCostItem(item.Key, "", value));
         }
     }
 
-    private void SyncEvictCostsWithCurrentVars()
+    private void OnEvictCostChanged()
+    {
+        if (_isLoadingConfig || _matrixSyncDepth > 0) return;
+        _matrixSyncDepth++;
+        try
+        {
+            // Do NOT call RefreshConfigPreview() here. That path rebuilds EvictCosts
+            // from MatrixVarsText, which clears/recreates the ItemsControl and makes
+            // the focused Cost TextBox lose focus on every typed character.
+            EvictCostsText = string.Join(Environment.NewLine, EvictCosts
+                .Where(v => !string.IsNullOrWhiteSpace(v.Key) && int.TryParse(v.Value, out var parsed) && parsed > 0)
+                .Select(v => $"{v.Key} = {v.Value}"));
+            UpdateConfigPreviewFromCurrentState();
+            AutoPersistMatrixToDisk();
+        }
+        finally { _matrixSyncDepth--; }
+    }
+
+    private void SyncEvictCostsWithCurrentVars(bool refreshPreview = true)
     {
         var existingByAlias = EvictCosts
             .Where(e => !string.IsNullOrWhiteSpace(e.Key))
@@ -846,16 +993,12 @@ public partial class MainViewModel : ObservableObject
             var previous = byModel ?? byAlias;
             var value = previous?.Value;
             if (!int.TryParse(value, out var parsed) || parsed <= 0) value = string.Empty;
-            EvictCosts.Add(new EvictCostItem
-            {
-                Key = alias,
-                ModelId = modelId,
-                Value = value,
-                Priority = EvictCostItem.PriorityFromCost(value),
-                ParentCollection = EvictCosts
-            });
+            EvictCosts.Add(CreateEvictCostItem(alias, modelId, value));
         }
-        SyncMatrixTextFromCollections();
+        EvictCostsText = string.Join(Environment.NewLine, EvictCosts
+            .Where(v => !string.IsNullOrWhiteSpace(v.Key) && int.TryParse(v.Value, out var parsed) && parsed > 0)
+            .Select(v => $"{v.Key} = {v.Value}"));
+        if (refreshPreview) UpdateConfigPreviewFromCurrentState();
     }
 
     private static IEnumerable<KeyValuePair<string, string>> ParseKeyValueLines(string text)
@@ -875,19 +1018,23 @@ public partial class MainViewModel : ObservableObject
 
     private void ExecuteAddMatrixVar()
     {
-        var item = new MatrixEntryItem { ParentCollection = MatrixVars };
+        var item = CreateMatrixEntryItem("", "", MatrixVars);
         MatrixVars.Add(item);
+        RefreshConfigPreview();
     }
 
     private void ExecuteAddMatrixSet()
     {
-        var item = new MatrixEntryItem { ParentCollection = MatrixSets };
+        var item = CreateMatrixEntryItem("", "", MatrixSets);
         MatrixSets.Add(item);
+        RefreshConfigPreview();
     }
 
     private void ExecuteAddEvictCost()
     {
-        EvictCosts.Add(new EvictCostItem { ParentCollection = EvictCosts });
+        var item = CreateEvictCostItem("", "", "");
+        EvictCosts.Add(item);
+        RefreshConfigPreview();
     }
 
     private void ExecuteCreateSetFromVars()
@@ -897,18 +1044,113 @@ public partial class MainViewModel : ObservableObject
         var varKeys = MatrixVars.Select(v => v.Key).ToList();
         if (varKeys.Count == 0) return;
         
-        var newItem = new MatrixEntryItem
-        {
-            Key = $"set_{MatrixSets.Count + 1}",
-            Value = string.Join(" & ", varKeys)
-        };
+        var newItem = CreateMatrixEntryItem($"set_{MatrixSets.Count + 1}", string.Join(" & ", varKeys), MatrixSets);
         MatrixSets.Add(newItem);
+        RebuildMatrixCombinationsFromSets();
+        RefreshConfigPreview();
     }
     public void SyncMatrixFromVisualBuilder()
     {
-        SyncMatrixTextFromCombinations();
-        SyncEvictCostsWithCurrentVars();
-        ConfigPreview = BuildConfigFromUI().ToYaml();
+        RefreshConfigPreview();
+    }
+
+    private MatrixEntryItem CreateMatrixEntryItem(string key, string value, ObservableCollection<MatrixEntryItem> parent)
+    {
+        var item = new MatrixEntryItem { Key = key, Value = value, ParentCollection = parent };
+        item.Changed += OnMatrixEntryChanged;
+        return item;
+    }
+
+    private EvictCostItem CreateEvictCostItem(string key, string modelId, string value)
+    {
+        var item = new EvictCostItem
+        {
+            Key = key,
+            ModelId = modelId,
+            Value = value,
+            Priority = EvictCostItem.PriorityFromCost(value),
+            ParentCollection = EvictCosts
+        };
+        item.Changed += OnEvictCostChanged;
+        return item;
+    }
+
+    private MatrixCombinationItem CreateMatrixCombinationItem(string name)
+    {
+        var combo = new MatrixCombinationItem { Name = name, ParentCollection = MatrixCombinations };
+        combo.Changed += OnMatrixCombinationChanged;
+        return combo;
+    }
+
+    private MatrixModelSelectionItem CreateMatrixModelSelectionItem(string modelId, string alias, bool isSelected)
+    {
+        var item = new MatrixModelSelectionItem { ModelId = modelId, Alias = alias, IsSelected = isSelected };
+        item.Changed += OnMatrixCombinationChanged;
+        return item;
+    }
+
+    private void OnMatrixEntryChanged()
+    {
+        if (_matrixSyncDepth > 0) return;
+        _matrixSyncDepth++;
+        try
+        {
+            SyncMatrixTextFromCollections();
+            RebuildMatrixCombinationsFromSets();
+            SyncEvictCostsWithCurrentVars(refreshPreview: false);
+            UpdateConfigPreviewFromCurrentState();
+        }
+        finally { _matrixSyncDepth--; }
+    }
+
+    private void OnMatrixCombinationChanged()
+    {
+        RefreshConfigPreview();
+    }
+
+    private List<(ModelEditItem model, string alias)> GetCurrentModelAliases()
+    {
+        var aliasesByModel = ParseKeyValueLines(MatrixVarsText)
+            .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+            .GroupBy(kv => kv.Value.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Key.Trim(), StringComparer.OrdinalIgnoreCase);
+        var used = new HashSet<string>(aliasesByModel.Values, StringComparer.OrdinalIgnoreCase);
+        var result = new List<(ModelEditItem model, string alias)>();
+        foreach (var model in Models.Where(m => !string.IsNullOrWhiteSpace(m.ModelId)))
+        {
+            if (!aliasesByModel.TryGetValue(model.ModelId, out var alias) || string.IsNullOrWhiteSpace(alias))
+            {
+                alias = MakeAlias(model.ModelId, used);
+                used.Add(alias);
+            }
+            result.Add((model, alias));
+        }
+        return result;
+    }
+
+    private void EnsureMatrixModelCoverage()
+    {
+        var modelAliases = GetCurrentModelAliases();
+        MatrixVarsText = string.Join(Environment.NewLine, modelAliases.Select(x => $"{x.alias} = {x.model.ModelId}"));
+
+        foreach (var combo in MatrixCombinations)
+        {
+            var selectedByModel = combo.Models
+                .Where(m => m.IsSelected)
+                .Select(m => m.ModelId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingByModel = combo.Models
+                .Where(m => !string.IsNullOrWhiteSpace(m.ModelId))
+                .GroupBy(m => m.ModelId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            combo.Models.Clear();
+            foreach (var (model, alias) in modelAliases)
+            {
+                var selected = selectedByModel.Contains(model.ModelId);
+                combo.Models.Add(CreateMatrixModelSelectionItem(model.ModelId, alias, selected));
+            }
+        }
     }
 
     private void RebuildMatrixCombinationsFromSets()
@@ -918,12 +1160,12 @@ public partial class MainViewModel : ObservableObject
         foreach (var set in ParseKeyValueLines(MatrixSetsText))
         {
             var selectedAliases = set.Value.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var combo = new MatrixCombinationItem { Name = set.Key, ParentCollection = MatrixCombinations };
+            var combo = CreateMatrixCombinationItem(set.Key);
             foreach (var model in Models)
             {
                 var alias = aliases.FirstOrDefault(x => x.Value == model.ModelId).Key;
                 if (string.IsNullOrWhiteSpace(alias)) alias = model.ModelId;
-                combo.Models.Add(new MatrixModelSelectionItem { ModelId = model.ModelId, Alias = alias, IsSelected = selectedAliases.Contains(alias) || selectedAliases.Contains(model.ModelId) });
+                combo.Models.Add(CreateMatrixModelSelectionItem(model.ModelId, alias, selectedAliases.Contains(alias) || selectedAliases.Contains(model.ModelId)));
             }
             MatrixCombinations.Add(combo);
         }
@@ -973,15 +1215,14 @@ public partial class MainViewModel : ObservableObject
 
     private void ExecuteAddMatrixCombination()
     {
-        var combo = new MatrixCombinationItem { Name = $"combo_{MatrixCombinations.Count + 1}", ParentCollection = MatrixCombinations };
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var model in Models.Where(m => !string.IsNullOrWhiteSpace(m.ModelId)))
+        EnsureMatrixModelCoverage();
+        var combo = CreateMatrixCombinationItem($"combo_{MatrixCombinations.Count + 1}");
+        foreach (var (model, alias) in GetCurrentModelAliases())
         {
-            var alias = MakeAlias(model.ModelId, used);
-            used.Add(alias);
-            combo.Models.Add(new MatrixModelSelectionItem { ModelId = model.ModelId, Alias = alias, IsSelected = false });
+            combo.Models.Add(CreateMatrixModelSelectionItem(model.ModelId, alias, false));
         }
         MatrixCombinations.Add(combo);
+        RefreshConfigPreview();
     }
 
     private void ExecuteGenerateMatrixVarsFromModels()
@@ -1006,6 +1247,10 @@ public partial class MainViewModel : ObservableObject
             lines.Add($"{key} = {model.ModelId}");
         }
         MatrixVarsText = string.Join(Environment.NewLine, lines);
+        SyncMatrixCollectionsFromText();
+        EnsureMatrixModelCoverage();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
+        UpdateConfigPreviewFromCurrentState();
         StatusText = "Vars generated from models.";
         StatusColor = "#A6E3A1";
     }
@@ -1013,18 +1258,16 @@ public partial class MainViewModel : ObservableObject
     private void ExecuteCreateAllModelsMatrixSet()
     {
         MatrixCombinations.Clear();
-        var combo = new MatrixCombinationItem { Name = "all", ParentCollection = MatrixCombinations };
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var model in Models.Where(m => !string.IsNullOrWhiteSpace(m.ModelId)))
+        var combo = CreateMatrixCombinationItem("all");
+        foreach (var (model, alias) in GetCurrentModelAliases())
         {
-            var alias = MakeAlias(model.ModelId, used);
-            used.Add(alias);
-            combo.Models.Add(new MatrixModelSelectionItem { ModelId = model.ModelId, Alias = alias, IsSelected = true });
+            combo.Models.Add(CreateMatrixModelSelectionItem(model.ModelId, alias, true));
         }
         if (combo.Models.Any())
             MatrixCombinations.Add(combo);
         SyncMatrixTextFromCombinations();
-        SyncEvictCostsWithCurrentVars();
+        SyncEvictCostsWithCurrentVars(refreshPreview: false);
+        UpdateConfigPreviewFromCurrentState();
         StatusText = combo.Models.Any() ? "Combination 'all' created." : "No models available for Matrix.";
         StatusColor = combo.Models.Any() ? "#A6E3A1" : "#FAB387";
     }
@@ -1348,6 +1591,7 @@ public partial class MatrixCombinationItem : ObservableObject
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private ObservableCollection<MatrixModelSelectionItem> _models = new();
     public ObservableCollection<MatrixCombinationItem>? ParentCollection { get; set; }
+    public event Action? Changed;
     public ICommand RemoveCommand { get; }
 
     public MatrixCombinationItem()
@@ -1355,9 +1599,14 @@ public partial class MatrixCombinationItem : ObservableObject
         RemoveCommand = new RelayCommand(() =>
         {
             if (ParentCollection != null && ParentCollection.Contains(this))
+            {
                 ParentCollection.Remove(this);
+                Changed?.Invoke();
+            }
         });
     }
+
+    partial void OnNameChanged(string value) => Changed?.Invoke();
 }
 
 public partial class MatrixModelSelectionItem : ObservableObject
@@ -1365,6 +1614,11 @@ public partial class MatrixModelSelectionItem : ObservableObject
     [ObservableProperty] private string _modelId = "";
     [ObservableProperty] private string _alias = "";
     [ObservableProperty] private bool _isSelected;
+    public event Action? Changed;
+
+    partial void OnIsSelectedChanged(bool value) => Changed?.Invoke();
+    partial void OnModelIdChanged(string value) => Changed?.Invoke();
+    partial void OnAliasChanged(string value) => Changed?.Invoke();
 }
 
 // Matrix entry item (reusable for vars and sets)
@@ -1373,6 +1627,7 @@ public partial class MatrixEntryItem : ObservableObject
     [ObservableProperty] private string _key = "";
     [ObservableProperty] private string _value = "";
 
+    public event Action? Changed;
     public ICommand RemoveCommand { get; }
     public ObservableCollection<MatrixEntryItem>? ParentCollection { get; set; }
 
@@ -1383,9 +1638,13 @@ public partial class MatrixEntryItem : ObservableObject
             if (ParentCollection != null && ParentCollection.Contains(this))
             {
                 ParentCollection.Remove(this);
+                Changed?.Invoke();
             }
         });
     }
+
+    partial void OnKeyChanged(string value) => Changed?.Invoke();
+    partial void OnValueChanged(string value) => Changed?.Invoke();
 }
 
 // Evict cost item
@@ -1397,6 +1656,12 @@ public partial class EvictCostItem : ObservableObject
     [ObservableProperty] private string _modelId = "";
     [ObservableProperty] private string _value = "";
     [ObservableProperty] private string _priority = "Normal";
+    private int _syncDepth = 0;
+
+    /// <summary>
+    /// Raised when priority or value changes, to notify the parent collection.
+    /// </summary>
+    public event Action? Changed;
 
     public ICommand RemoveCommand { get; }
     public ObservableCollection<EvictCostItem>? ParentCollection { get; set; }
@@ -1408,26 +1673,65 @@ public partial class EvictCostItem : ObservableObject
             if (ParentCollection != null && ParentCollection.Contains(this))
             {
                 ParentCollection.Remove(this);
+                Changed?.Invoke();
             }
         });
     }
 
     partial void OnPriorityChanged(string value)
     {
-        Value = value switch
+        if (_syncDepth > 0) return;
+        _syncDepth++;
+        try
         {
-            "Keep longer" => "1",
-            "Normal" => "",
-            "Evict sooner" => "100",
-            _ => Value
-        };
+            var nextValue = value switch
+            {
+                "Keep longer" => "1",
+                "Normal" => "",
+                "Evict sooner" => "100",
+                _ => Value
+            };
+            if (Value != nextValue) Value = nextValue;
+            Changed?.Invoke();
+        }
+        finally { _syncDepth--; }
     }
 
     partial void OnValueChanged(string value)
     {
-        var next = PriorityFromCost(value);
-        if (Priority != next)
-            Priority = next;
+        if (_syncDepth > 0) return;
+        _syncDepth++;
+        try
+        {
+            var sanitized = SanitizeCost(value);
+            if (Value != sanitized)
+            {
+                Value = sanitized;
+            }
+
+            var next = PriorityFromCost(sanitized);
+            // Manual cost edits must update the visual priority without letting
+            // OnPriorityChanged map the combo selection back over the typed value.
+            // Example: typing 60 should show Custom, but must keep Value=60.
+            if (Priority != next)
+            {
+                Priority = next;
+            }
+            Changed?.Invoke();
+        }
+        finally { _syncDepth--; }
+    }
+
+    partial void OnKeyChanged(string value) => Changed?.Invoke();
+    partial void OnModelIdChanged(string value) => Changed?.Invoke();
+
+    private static string SanitizeCost(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(digits)) return string.Empty;
+        if (!int.TryParse(digits, out var cost)) return string.Empty;
+        return cost <= 0 ? string.Empty : cost.ToString();
     }
 
     public static string PriorityFromCost(string value)
@@ -1436,9 +1740,9 @@ public partial class EvictCostItem : ObservableObject
         if (!int.TryParse(value, out var cost)) return "Custom";
         return cost switch
         {
-            <= 0 => "Custom",
-            <= 10 => "Keep longer",
-            >= 100 => "Evict sooner",
+            <= 0 => "Normal",
+            1 => "Keep longer",
+            100 => "Evict sooner",
             _ => "Custom"
         };
     }
