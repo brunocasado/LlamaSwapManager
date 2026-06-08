@@ -18,9 +18,24 @@ APP_NAME="LlamaSwapManager"
 BUNDLE_ID="me.brunocasado.llamaswapmanager"
 VERSION="1.0.0"
 
-# ── Validate prerequisites ────────────────────────────────────────
-if ! command -v dotnet &>/dev/null; then
+# ── Find dotnet ───────────────────────────────────────────────────
+DOTNET_CMD=""
+for candidate in \
+  "$(command -v dotnet 2>/dev/null)" \
+  "$HOME/.dotnet/dotnet" \
+  "/usr/local/share/dotnet/dotnet" \
+  "/usr/local/bin/dotnet" \
+  "/opt/homebrew/bin/dotnet" \
+  "/usr/share/dotnet/dotnet"; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    DOTNET_CMD="$candidate"
+    break
+  fi
+done
+
+if [ -z "$DOTNET_CMD" ]; then
   echo "❌ dotnet not found. Please install the .NET 9 SDK."
+  echo "   Common locations: ~/.dotnet/dotnet, /usr/local/share/dotnet/dotnet"
   exit 1
 fi
 
@@ -39,7 +54,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # ── 1. dotnet publish (self-contained, osx-arm64, Release) ───────
 echo "📦 Publishing for osx-arm64 (Release)..."
-dotnet publish "$PROJECT_DIR/$EXECUTABLE.csproj" \
+$DOTNET_CMD publish "$PROJECT_DIR/$EXECUTABLE.csproj" \
   -r osx-arm64 \
   -c Release \
   --self-contained true \
