@@ -19,6 +19,17 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         AddHandler(KeyDownEvent, OnWindowKeyDownTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        
+        // Intercept window closing to hide instead of exit (Tray behavior)
+        Closing += OnWindowClosing;
+    }
+
+    private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        // Prevent the application from closing; just hide the window.
+        // The user can quit via the Tray icon menu.
+        e.Cancel = true;
+        this.Hide();
     }
 
     private static bool IsCopyGesture(KeyEventArgs e)

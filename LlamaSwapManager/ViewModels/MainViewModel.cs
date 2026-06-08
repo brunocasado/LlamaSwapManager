@@ -1272,6 +1272,24 @@ public partial class MainViewModel : ObservableObject
         StatusColor = combo.Models.Any() ? "#A6E3A1" : "#FAB387";
     }
 
+    /// <summary>
+    /// Gracefully stops the llama-swap process and shuts down the application.
+    /// Called from the Tray "Quit" menu.
+    /// </summary>
+    public async Task QuitApplicationAsync()
+    {
+        if (_processManager.Status == LlamaSwapStatus.Running || _processManager.Status == LlamaSwapStatus.Starting)
+        {
+            await ExecuteStopAsync();
+            await Task.Delay(1500); // Give it a moment to shut down gracefully
+        }
+        
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
+    }
+
 }
 
 // Editable model item that parses cmd string
