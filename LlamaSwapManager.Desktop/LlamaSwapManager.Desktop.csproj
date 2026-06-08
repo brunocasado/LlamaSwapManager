@@ -9,6 +9,12 @@
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
+  <!-- macOS: informa o .app bundle qual icone usar no Dock / Cmd+Tab.
+       O SDK do .NET gera um Info.plist automaticamente e inclui este campo. -->
+  <PropertyGroup Condition="'$(IsOSX)'=='true'">
+    <CFBundleIconFile>Assets/icon.icns</CFBundleIconFile>
+  </PropertyGroup>
+
   <ItemGroup>
      <PackageReference Include="Avalonia" Version="12.0.4" />
      <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
@@ -20,9 +26,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\**" />
+    <AvaloniaResource Include="Assets\**" Exclude="Assets\icon.icns" />
     <AvaloniaResource Include="Converters\**" />
     <AvaloniaResource Include="Themes\**" />
+    <!-- icon.icns é usado pelo .app bundle do macOS, não pelo runtime Avalonia -->
+    <Content Include="Assets\icon.icns" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
