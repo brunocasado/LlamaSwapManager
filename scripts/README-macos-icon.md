@@ -1,56 +1,56 @@
 # macOS Icon — Dock / Cmd+Tab
 
-## Por que `dotnet run` não mostra o ícone no Dock
+## Why `dotnet run` does not show the Dock icon
 
-Quando você roda `dotnet run` no macOS, o SDK do .NET **não gera um `.app` bundle** — ele executa o binário diretamente como um processo Unix. Sem um `.app` bundle, não há `Info.plist` com `CFBundleIconFile`, e o macOS não sabe qual ícone usar no Dock ou no Cmd+Tab. O resultado é o ícone padrão (branco/blank).
+When you run `dotnet run` on macOS, the .NET SDK **does not generate an `.app` bundle** — it runs the binary directly as a Unix process. Without an `.app` bundle, there is no `Info.plist` with `CFBundleIconFile`, and macOS has no idea which icon to use for the Dock or Cmd+Tab. The result is the default blank icon.
 
-## Como testar o ícone corretamente
+## How to test the icon correctly
 
-### Opção 1: Script de package (recomendado)
+### Option 1: Package script (recommended)
 
 ```bash
 cd ~/projects/LlamaSwapManager
 bash scripts/package-macos.sh
 ```
 
-Isso cria `./publish/LlamaSwapManager.app` com:
-- `Contents/Info.plist` com `CFBundleIconFile = icon`
-- `Contents/Resources/icon.icns` (16x16 até 1024x1024)
-- Todos os DLLs e dependências em `Contents/MacOS/`
+This creates `./publish/LlamaSwapManager.app` with:
+- `Contents/Info.plist` containing `CFBundleIconFile = icon`
+- `Contents/Resources/icon.icns` (16x16 through 1024x1024)
+- All DLLs and dependencies in `Contents/MacOS/`
 
-Depois abra:
+Then open:
 
 ```bash
 open ./publish/LlamaSwapManager.app
 ```
 
-### Opção 2: Publish manual
+### Option 2: Manual publish
 
 ```bash
 cd ~/projects/LlamaSwapManager
 dotnet publish LlamaSwapManager.Desktop/LlamaSwapManager.Desktop.csproj \
   -r osx-arm64 -c Release --self-contained true -o ./publish/raw
 
-# Montar o .app bundle manualmente (ver scripts/package-macos.sh para referência)
+# Manually assemble the .app bundle (see scripts/package-macos.sh for reference)
 ```
 
-## O que funciona sem o .app bundle
+## What works without the .app bundle
 
-| Recurso | `dotnet run` | `LlamaSwapManager.app` |
+| Feature | `dotnet run` | `LlamaSwapManager.app` |
 |---|---|---|
-| Janela abre | ✅ | ✅ |
+| Window opens | ✅ | ✅ |
 | Tray icon | ✅ | ✅ |
-| Ícone da janela (title bar) | ✅ | ✅ |
-| **Ícone do Dock** | ❌ branco | ✅ llama |
-| **Ícone Cmd+Tab** | ❌ branco | ✅ llama |
+| Window icon (title bar) | ✅ | ✅ |
+| **Dock icon** | ❌ blank | ✅ llama |
+| **Cmd+Tab icon** | ❌ blank | ✅ llama |
 
-## Arquivos de ícone
+## Icon files
 
-- **`LlamaSwapManager.Desktop/Assets/llama.png`** — fonte original
-- **`LlamaSwapManager.Desktop/icon.icns`** — formato macOS nativo (gerado com `sips` + `iconutil`)
+- **`LlamaSwapManager.Desktop/Assets/llama.png`** — source image
+- **`LlamaSwapManager.Desktop/icon.icns`** — macOS native format (generated with `sips` + `iconutil`)
 
-## Notas
+## Notes
 
-- O script `package-macos.sh` é auto-contido e pode ser rodado repetidamente.
-- Se quiser distribuir o app, assine com `codesign` e notarie com `xcrun altool`.
-- Para re-build limpo, execute `rm -rf publish/` antes de rodar o script.
+- The `package-macos.sh` script is self-contained and can be re-run at any time.
+- To distribute the app, sign with `codesign` and notarize with `xcrun altool`.
+- For a clean rebuild, run `rm -rf publish/` before executing the script.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # package-macos.sh
-# Cria o .app bundle do LlamaSwapManager com ícone correto no Dock / Cmd+Tab.
-# Uso: bash scripts/package-macos.sh
+# Builds a proper macOS .app bundle for LlamaSwapManager with the correct Dock / Cmd+Tab icon.
+# Usage: bash scripts/package-macos.sh
 
 set -euo pipefail
 
@@ -18,27 +18,27 @@ APP_NAME="LlamaSwapManager"
 BUNDLE_ID="me.brunocasado.llamaswapmanager"
 VERSION="1.0.0"
 
-# ── Validar pré-requisitos ────────────────────────────────────────
+# ── Validate prerequisites ────────────────────────────────────────
 if ! command -v dotnet &>/dev/null; then
-  echo "❌ dotnet não encontrado. Instale o .NET 9 SDK."
+  echo "❌ dotnet not found. Please install the .NET 9 SDK."
   exit 1
 fi
 
 if [ ! -f "$ICON_ICNS" ]; then
-  echo "❌ Icone não encontrado: $ICON_ICNS"
-  echo "   Gere com: sips + iconutil a partir do llama.png"
+  echo "❌ Icon not found: $ICON_ICNS"
+  echo "   Generate it with: sips + iconutil from llama.png"
   exit 1
 fi
 
-# ── Limpar artefatos anteriores ───────────────────────────────────
-echo "🧹 Limpando pastas anteriores..."
+# ── Clean previous artifacts ──────────────────────────────────────
+echo "🧹 Cleaning previous artifacts..."
 rm -rf "$PUBLISH_DIR"
 mkdir -p "$RAW_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # ── 1. dotnet publish (self-contained, osx-arm64, Release) ───────
-echo "📦 Publicando para osx-arm64 (Release)..."
+echo "📦 Publishing for osx-arm64 (Release)..."
 dotnet publish "$PROJECT_DIR/$EXECUTABLE.csproj" \
   -r osx-arm64 \
   -c Release \
@@ -47,23 +47,23 @@ dotnet publish "$PROJECT_DIR/$EXECUTABLE.csproj" \
   -v quiet
 
 if [ ! -f "$RAW_DIR/$EXECUTABLE" ]; then
-  echo "❌ Binário não gerado: $RAW_DIR/$EXECUTABLE"
+  echo "❌ Binary not generated: $RAW_DIR/$EXECUTABLE"
   exit 1
 fi
 
-echo "   ✓ Binário publicado: $(ls "$RAW_DIR" | wc -l | tr -d ' ') arquivos"
+echo "   ✓ Published: $(ls "$RAW_DIR" | wc -l | tr -d ' ') files"
 
-# ── 2. Montar o .app bundle ──────────────────────────────────────
-echo "📦 Montando $APP_BUNDLE..."
+# ── 2. Assemble the .app bundle ──────────────────────────────────
+echo "📦 Assembling $APP_BUNDLE..."
 
-# Copiar tudo para Contents/MacOS/
+# Copy all published files into Contents/MacOS/
 cp -R "$RAW_DIR"/* "$APP_BUNDLE/Contents/MacOS/"
 
-# ── 3. Copiar icns ───────────────────────────────────────────────
+# ── 3. Copy icon.icns ────────────────────────────────────────────
 cp "$ICON_ICNS" "$APP_BUNDLE/Contents/Resources/icon.icns"
-echo "   ✓ icon.icns copiado"
+echo "   ✓ icon.icns copied"
 
-# ── 4. Gerar Info.plist ──────────────────────────────────────────
+# ── 4. Generate Info.plist ───────────────────────────────────────
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -91,33 +91,33 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
-echo "   ✓ Info.plist gerado"
+echo "   ✓ Info.plist generated"
 
-# ── 5. Tornar executável executável ──────────────────────────────
+# ── 5. Make the executable executable ────────────────────────────
 chmod +x "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE"
-echo "   ✓ Permissão +x aplicada"
+echo "   ✓ +x permission applied"
 
-# ── 6. Remover quarantine (se presente) ──────────────────────────
+# ── 6. Remove quarantine attribute (if present) ──────────────────
 if command -v xattr &>/dev/null; then
   xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
-  echo "   ✓ Quarantine removido"
+  echo "   ✓ Quarantine removed"
 fi
 
-# ── 7. Validar estrutura ─────────────────────────────────────────
+# ── 7. Validate structure ────────────────────────────────────────
 echo ""
-echo "📋 Estrutura final:"
+echo "📋 Final structure:"
 echo "   publish/LlamaSwapManager.app/"
 echo "   └── Contents/"
 echo "        ├── Info.plist"
 echo "        ├── MacOS/"
-echo "        │    └── $EXECUTABLE (e todas as dependências)"
+echo "        │    └── $EXECUTABLE (and all dependencies)"
 echo "        └── Resources/"
 echo "             └── icon.icns"
 echo ""
 
-# ── 8. Abrir o app ───────────────────────────────────────────────
-echo "🚀 Abrindo o app..."
+# ── 8. Open the app ──────────────────────────────────────────────
+echo "🚀 Opening the app..."
 open "$APP_BUNDLE"
 
 echo ""
-echo "✅ Pronto! Verifique o ícone no Dock e no Cmd+Tab."
+echo "✅ Done! Check the Dock and Cmd+Tab for the llama icon."
