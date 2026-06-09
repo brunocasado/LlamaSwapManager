@@ -648,7 +648,12 @@ public partial class MainViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(SelectedModel.ModelPath))
             SelectedModelSourceLabel = $"Local GGUF: {Path.GetFileName(SelectedModel.ModelPath)}";
         else if (!string.IsNullOrWhiteSpace(SelectedModel.HfModel))
-            SelectedModelSourceLabel = $"Hugging Face GGUF: {SelectedModel.HfModel}";
+        {
+            var q = !string.IsNullOrWhiteSpace(SelectedModel.SelectedQuantization)
+                ? $" [{SelectedModel.SelectedQuantization}]"
+                : "";
+            SelectedModelSourceLabel = $"Hugging Face GGUF: {SelectedModel.HfModel}{q}";
+        }
         else
             SelectedModelSourceLabel = "Choose a local GGUF file or Hugging Face GGUF repo";
     }
@@ -706,10 +711,27 @@ public partial class MainViewModel : ObservableObject
         if (SelectedModel == null || string.IsNullOrWhiteSpace(modelId)) return;
         SelectedModel.HfModel = modelId;
         SelectedModel.ModelPath = "";
+        SelectedModel.SelectedQuantization = "";
         HfSearchQuery = modelId;
         IsModelPickerOpen = false;
         UpdateSelectedModelSourceLabel();
         StatusText = "Hugging Face model selected.";
+        StatusColor = "#A6E3A1";
+    }
+
+    public void SetHfModelWithQuantization(string modelId, string quantizationFilename)
+    {
+        if (SelectedModel == null || string.IsNullOrWhiteSpace(modelId)) return;
+        SelectedModel.HfModel = modelId;
+        SelectedModel.ModelPath = "";
+        // Extract just the quantization label: filename without extension
+        // e.g., "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf" → "UD-Q4_K_XL"
+        var quantLabel = System.IO.Path.GetFileNameWithoutExtension(quantizationFilename);
+        SelectedModel.SelectedQuantization = quantLabel;
+        HfSearchQuery = modelId;
+        IsModelPickerOpen = false;
+        UpdateSelectedModelSourceLabel();
+        StatusText = $"Hugging Face model selected ({quantLabel}).";
         StatusColor = "#A6E3A1";
     }
 
@@ -1301,6 +1323,7 @@ public partial class ModelEditItem : ObservableObject
     [ObservableProperty] private string _llamaServerPath = "";
     [ObservableProperty] private string _hfModel = "";
     [ObservableProperty] private string _modelPath = "";
+    [ObservableProperty] private string _selectedQuantization = "";
     [ObservableProperty] private string _host = "127.0.0.1";
     [ObservableProperty] private string _port = "${PORT}";
     [ObservableProperty] private string _temperature = "0.2";
@@ -1351,7 +1374,20 @@ public partial class ModelEditItem : ObservableObject
     [ObservableProperty] private bool _isNew = false;
     [ObservableProperty] private bool _isSelected = false;
 
-    public string CmdPreview => !string.IsNullOrWhiteSpace(ModelPath) ? $"-m {Path.GetFileName(ModelPath)} --temp {Temperature}" : $"--hf {HfModel} --temp {Temperature}";
+    public string CmdPreview
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(ModelPath))
+                return $"-m {Path.GetFileName(ModelPath)} --temp {Temperature}";
+            if (!string.IsNullOrWhiteSpace(HfModel))
+            {
+                var q = !string.IsNullOrWhiteSpace(SelectedQuantization) ? $" ({SelectedQuantization})" : "";
+                return $"--hf {HfModel}{q} --temp {Temperature}";
+            }
+            return $"--temp {Temperature}";
+        }
+    }
 
     public ModelEditItem CloneAs(string newModelId)
     {
@@ -1363,6 +1399,7 @@ public partial class ModelEditItem : ObservableObject
             AliasesText = "",
             LlamaServerPath = LlamaServerPath,
             ModelPath = ModelPath,
+            SelectedQuantization = SelectedQuantization,
             HfModel = HfModel,
             Host = Host,
             Port = Port,
@@ -1452,7 +1489,21 @@ public partial class ModelEditItem : ObservableObject
                 else if (Match("--mmap")) item.NoMmap = false;
                 else if (Match("--mlock")) item.Mlock = true;
                 else if (Match("-m", "--model")) item.ModelPath = Next() ?? "";
-                else if (Match("-hf", "-hfr", "--hf", "--hf-repo")) item.HfModel = Next() ?? "";
+                else if (Match("-hf", "-hfr", "--hf", "--hf-repo"))
+                {
+                    var hfArg = Next() ?? "";
+                    var colonIdx = hfArg.LastIndexOf(':');
+                    if (colonIdx > 0)
+                    {
+                        item.HfModel = hfArg[..colonIdx];
+                        item.SelectedQuantization = hfArg[(colonIdx + 1)..];
+                    }
+                    else
+                    {
+                        item.HfModel = hfArg;
+                        item.SelectedQuantization = "";
+                    }
+                }
                 else if (Match("--host")) item.Host = Next() ?? item.Host;
                 else if (Match("--port")) item.Port = Next() ?? item.Port;
                 else if (Match("--temp", "--temperature")) item.Temperature = Next() ?? item.Temperature;
@@ -1513,7 +1564,13 @@ public partial class ModelEditItem : ObservableObject
 
         if (!string.IsNullOrWhiteSpace(LlamaServerPath)) parts.Add(QuoteIfNeeded(LlamaServerPath.Trim()));
         if (!string.IsNullOrWhiteSpace(ModelPath)) AddValue("-m", ModelPath);
-        else if (!string.IsNullOrWhiteSpace(HfModel)) AddValue("-hf", HfModel);
+        else if (!string.IsNullOrWhiteSpace(HfModel))
+        {
+            var hfArg = SelectedQuantization != null && SelectedQuantization.Contains('/')
+                ? HfModel + ":" + SelectedQuantization
+                : (string.IsNullOrEmpty(SelectedQuantization) ? HfModel : HfModel + ":" + SelectedQuantization);
+            AddValue("-hf", hfArg);
+        }
 
         AddValue("--host", Host);
         AddValue("--port", Port);

@@ -1,12 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -243,12 +247,35 @@ public partial class MainWindow : Window
         };
 
         var queryBox = new TextBox { PlaceholderText = "Search Hugging Face GGUF repos, e.g. Qwen3.6 Q4_K_M", Text = vm.HfSearchQuery };
-        var results = new StackPanel { Spacing = 6 };
+
+        // --- Content area ---
+        var contentScroll = new ScrollViewer { Margin = new Avalonia.Thickness(0, 12, 0, 12), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var contentPanel = new StackPanel { Spacing = 6 };
+        contentScroll.Content = contentPanel;
+
+        // --- Status (always in footer) ---
         var status = new TextBlock { Text = "Choose a local .gguf file or search Hugging Face GGUF repositories.", Foreground = Avalonia.Media.Brushes.Gray };
+
+        // --- Search results panel ---
+        var searchResultsPanel = new StackPanel { Spacing = 6 };
+
+        // --- Quantization selection area (hidden until a repo is selected) ---
+        var quantTitle = new TextBlock { Text = "Select quantization", FontWeight = Avalonia.Media.FontWeight.Bold, Foreground = Avalonia.Media.Brushes.White, FontSize = 14 };
+        var quantScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 200 };
+        var quantList = new StackPanel { Spacing = 4 };
+        quantScroll.Content = quantList;
 
         async System.Threading.Tasks.Task SearchAsync()
         {
-            results.Children.Clear();
+            // Reset UI: show search results panel + quantization area (hidden)
+            contentPanel.Children.Clear();
+            contentPanel.Children.Add(searchResultsPanel);
+            contentPanel.Children.Add(quantTitle);
+            contentPanel.Children.Add(quantScroll);
+            quantScroll.IsVisible = false;
+            searchResultsPanel.Children.Clear();
+            quantList.Children.Clear();
+
             var query = queryBox.Text;
             if (string.IsNullOrWhiteSpace(query)) return;
             status.Text = "Searching...";
@@ -272,18 +299,115 @@ public partial class MainWindow : Window
                         HorizontalContentAlignment = HorizontalAlignment.Left,
                         Padding = new Avalonia.Thickness(12, 8)
                     };
-                    button.Click += (_, _) =>
+                    button.Click += async (_, _) =>
                     {
-                        vm.SetHfModel(modelId);
-                        dialog.Close();
+                        // Show loading indicator
+                        searchResultsPanel.Children.Clear();
+                        var loadingText = new TextBlock { Text = $"Loading quantizations for {modelId}...", Foreground = Avalonia.Media.Brushes.Gray, Margin = new Avalonia.Thickness(0, 8, 0, 8) };
+                        searchResultsPanel.Children.Add(loadingText);
+
+                        try
+                        {
+                            using var http2 = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                            var treeUrl = $"https://huggingface.co/api/models/{modelId}/tree/main";
+                            var response = await http2.GetAsync(treeUrl);
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                var body = await response.Content.ReadAsStringAsync();
+                                status.Text = $"Failed to load quantizations: {response.StatusCode} ({response.ReasonPhrase})";
+                                loadingText.Text = $"Error: {response.StatusCode} — {body}";
+                                return;
+                            }
+                            using var stream2 = await response.Content.ReadAsStreamAsync();
+                            var treeJson = await JsonDocument.ParseAsync(stream2);
+                            var ggufFiles = new List<(string label, string filename)>();
+
+                            foreach (var file in treeJson.RootElement.EnumerateArray())
+                            {
+                                if (!file.TryGetProperty("path", out var pathProp)) continue;
+                                var path = pathProp.GetString();
+                                if (string.IsNullOrWhiteSpace(path)) continue;
+                                if (!path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)) continue;
+
+                                var fileName = System.IO.Path.GetFileName(path);
+                                var quantLabel = ExtractQuantizationLabel(fileName);
+                                if (string.IsNullOrWhiteSpace(quantLabel)) continue;
+
+                                ggufFiles.Add((quantLabel, path));
+                            }
+
+                            searchResultsPanel.Children.Clear();
+
+                            if (ggufFiles.Count == 0)
+                            {
+                                searchResultsPanel.Children.Add(new TextBlock { Text = "No GGUF files found in this repository.", Foreground = Avalonia.Media.Brushes.Gray });
+                                status.Text = "No GGUF files found.";
+                                return;
+                            }
+
+                            // Sort by quality preference: Q8 > Q6 > Q5 > Q4 > Q3 > Q2 > IQ...
+                            ggufFiles.Sort((a, b) => CompareQuantization(a.label, b.label));
+
+                            // Show repo name as header
+                            searchResultsPanel.Children.Add(new TextBlock
+                            {
+                                Text = modelId,
+                                FontWeight = Avalonia.Media.FontWeight.Bold,
+                                Foreground = Avalonia.Media.Brushes.White,
+                                FontSize = 14,
+                                Margin = new Avalonia.Thickness(0, 4, 0, 4)
+                            });
+
+                            // Show quantization buttons
+                            foreach (var (label, filename) in ggufFiles)
+                            {
+                                var qBtn = new Button
+                                {
+                                    Content = $"{label}  —  {filename}",
+                                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                                    Padding = new Avalonia.Thickness(12, 8),
+                                    Classes = { "quant-btn" }
+                                };
+                                qBtn.Click += (_, __) =>
+{
+    // Extract quantization label from filename (e.g., "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf" -> "UD-Q4_K_XL")
+    var quantLabel = ExtractQuantizationLabel(filename);
+    if (string.IsNullOrWhiteSpace(quantLabel))
+    {
+        // Fallback to filename without extension if no pattern matched
+        quantLabel = System.IO.Path.GetFileNameWithoutExtension(filename);
+    }
+    vm.SetHfModelWithQuantization(modelId, quantLabel);
+    dialog.Close();
+};;
+                                searchResultsPanel.Children.Add(qBtn);
+                            }
+
+                            status.Text = $"{ggufFiles.Count} quantization(s) found. Click one to select.";
+                        }
+                        catch (Exception ex)
+                        {
+                            status.Text = $"Failed to load quantizations: {ex.Message}";
+                            loadingText.Text = $"Error: {ex.Message}";
+                        }
                     };
-                    results.Children.Add(button);
+                    searchResultsPanel.Children.Add(button);
                 }
-                status.Text = count == 0 ? "No GGUF repositories found." : $"{count} result(s). Click one to select it.";
+                if (count == 0)
+                {
+                    searchResultsPanel.Children.Add(new TextBlock { Text = "No GGUF repositories found.", Foreground = Avalonia.Media.Brushes.Gray });
+                    status.Text = "No GGUF repositories found.";
+                }
+                else
+                {
+                    status.Text = $"{count} result(s). Click one to see available quantizations.";
+                }
             }
             catch (Exception ex)
             {
                 status.Text = $"Search failed: {ex.Message}";
+                searchResultsPanel.Children.Add(new TextBlock { Text = $"Search failed: {ex.Message}", Foreground = Avalonia.Media.Brushes.Red });
             }
         }
 
@@ -334,8 +458,7 @@ public partial class MainWindow : Window
         searchGrid.Children.Add(searchButton);
         Grid.SetRow(searchGrid, 2);
 
-        var resultsScroller = new ScrollViewer { Margin = new Avalonia.Thickness(0, 12, 0, 12), Content = results };
-        Grid.SetRow(resultsScroller, 3);
+        Grid.SetRow(contentScroll, 3);
 
         var cancelButton = new Button { Content = "Cancel", IsCancel = true, Padding = new Avalonia.Thickness(12, 8) };
         var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -352,11 +475,94 @@ public partial class MainWindow : Window
         rootGrid.Children.Add(titleBlock);
         rootGrid.Children.Add(localBorder);
         rootGrid.Children.Add(searchGrid);
-        rootGrid.Children.Add(resultsScroller);
+        rootGrid.Children.Add(contentScroll);
         rootGrid.Children.Add(footer);
         dialog.Content = rootGrid;
 
         await dialog.ShowDialog(this);
+    }
+
+
+    /// <summary>
+    /// Extract a human-readable quantization label from a GGUF filename.
+    /// E.g. "Qwen2.5-7B-Instruct-Q4_K_M.gguf" → "Q4_K_M"
+    /// </summary>
+    private static string? ExtractQuantizationLabel(string fileName)
+    {
+        var baseName = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        // Common quantization patterns: Q4_K_M, Q5_K_M, Q8_0, IQ4_XS, FP16, BF16, F32, etc.
+        var quantPatterns = new[]
+        {
+            @"Q8_0", @"Q8_K", @"Q6_K", @"Q5_K_M", @"Q5_K_S", @"Q5_0", @"Q5_1",
+            @"Q4_K_M", @"Q4_K_S", @"Q4_0", @"Q4_1",
+            @"Q3_K_M", @"Q3_K_S", @"Q3_K_L",
+            @"Q2_K", @"Q2_0",
+            @"IQ4_XS", @"IQ4_NL", @"IQ3_XS", @"IQ3_S", @"IQ3_M", @"IQ3_2", @"IQ3_1",
+            @"IQ2_XS", @"IQ2_S", @"IQ2_M", @"IQ2_2", @"IQ2_1",
+            @"IQ1_S", @"IQ1_M",
+            @"FP16", @"FP8_M", @"FP8_E4M3", @"FP8_E5M2",
+            @"BF16", @"F32", @"F16"
+        };
+
+        // Check for known patterns first (exact match)
+        foreach (var pattern in quantPatterns)
+        {
+            if (baseName.EndsWith(pattern, StringComparison.OrdinalIgnoreCase) || 
+                baseName.Contains($"-{pattern}", StringComparison.OrdinalIgnoreCase) ||
+                baseName.Contains($"_{pattern}", StringComparison.OrdinalIgnoreCase))
+            {
+                return pattern;
+            }
+        }
+
+        // Fallback: try to extract quantization from the end of the filename
+        // Pattern: looks for quantization at the end after last - or _
+        var match = System.Text.RegularExpressions.Regex.Match(baseName, @"[-_]((UD-|IQ-)?[QIq][A-Za-z]*\d[\w_]*|FP\d+[A-Z_]*|BF\d+|F\d+[A-Z]*)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+
+        // Last resort: return the part after the last - or _ if it looks like a quantization
+        var lastPart = baseName.Split(new[] { '-', '_' }).LastOrDefault();
+        if (!string.IsNullOrWhiteSpace(lastPart) && 
+            (lastPart.Length >= 2 && 
+             (lastPart.StartsWith("Q", StringComparison.OrdinalIgnoreCase) ||
+              lastPart.StartsWith("IQ", StringComparison.OrdinalIgnoreCase) ||
+              lastPart.StartsWith("FP", StringComparison.OrdinalIgnoreCase) ||
+              lastPart.StartsWith("BF", StringComparison.OrdinalIgnoreCase) ||
+              lastPart.StartsWith("UD", StringComparison.OrdinalIgnoreCase))))
+        {
+            return lastPart;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sort quantizations by preference (higher quality first).
+    /// </summary>
+    private static int CompareQuantization(string a, string b)
+    {
+        var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "FP8_M", 1 }, { "FP8_E4M3", 1 }, { "FP8_E5M2", 1 },
+            { "FP16", 2 }, { "BF16", 2 }, { "F16", 2 }, { "F32", 3 },
+            { "Q8_0", 4 }, { "Q8_K", 4 },
+            { "Q6_K", 5 },
+            { "Q5_K_M", 6 }, { "Q5_K_S", 6 }, { "Q5_0", 6 }, { "Q5_1", 6 },
+            { "Q4_K_M", 7 }, { "Q4_K_S", 7 }, { "Q4_0", 7 }, { "Q4_1", 7 },
+            { "Q3_K_M", 8 }, { "Q3_K_S", 8 }, { "Q3_K_L", 8 },
+            { "Q2_K", 9 }, { "Q2_0", 9 },
+            { "IQ4_XS", 10 }, { "IQ4_NL", 10 },
+            { "IQ3_XS", 11 }, { "IQ3_S", 11 }, { "IQ3_M", 11 },
+            { "IQ2_XS", 12 }, { "IQ2_S", 12 },
+            { "IQ1_S", 13 }, { "IQ1_M", 13 }
+        };
+
+        var aScore = order.TryGetValue(a, out var va) ? va : 50;
+        var bScore = order.TryGetValue(b, out var vb) ? vb : 50;
+        return aScore.CompareTo(bScore);
     }
 
     private async void OnBrowseLocalModelClick(object? sender, RoutedEventArgs e)
