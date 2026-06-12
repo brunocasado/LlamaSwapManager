@@ -63,15 +63,15 @@ public class LlamaSwapProcessManager : IDisposable
     }
 
     public void RefreshPaths() => ResolvePaths();
-    public void DetectApiUrl() => ApiBaseUrl = DetectApiBaseUrl();
-    public void DetectLlamaServerUrl() => LlamaServerBaseUrl = DetectLlamaServerBaseUrl();
+    public void DetectApiUrl() => _ = Task.Run(async () => ApiBaseUrl = await DetectApiBaseUrlAsync());
+    public void DetectLlamaServerUrl() => _ = Task.Run(async () => LlamaServerBaseUrl = await DetectLlamaServerBaseUrlAsync());
 
     /// <summary>
     /// Public alias for dynamic re-detection. Call this from the metrics polling loop
     /// so that when llama-swap switches models (and thus the upstream llama-server port),
     /// the manager picks up the new port automatically.
     /// </summary>
-    public void RefreshLlamaServerUrl() => LlamaServerBaseUrl = DetectLlamaServerBaseUrl();
+    public void RefreshLlamaServerUrl() => _ = Task.Run(async () => LlamaServerBaseUrl = await DetectLlamaServerBaseUrlAsync());
 
     private string? ResolveExecutable()
     {
@@ -123,7 +123,7 @@ public class LlamaSwapProcessManager : IDisposable
     {
         ResolvePaths();
         LogProcessSnapshot("start requested");
-        var existingApi = DetectApiBaseUrl();
+        var existingApi = await DetectApiBaseUrlAsync();
         if (Status == LlamaSwapStatus.Running || existingApi is not null)
         {
             ApiBaseUrl = existingApi;
@@ -164,7 +164,9 @@ public class LlamaSwapProcessManager : IDisposable
                         CreateNoWindow = true,
                         WindowStyle = ProcessWindowStyle.Hidden
                     };
-                    Process.Start(psiUnblock)?.WaitForExit();
+                    var proc = Process.Start(psiUnblock);
+                    if (proc is not null)
+                        await proc.WaitForExitAsync();
                 }
                 catch (Exception ex) { LogMessage?.Invoke($"[manager] unload failed: {ex.Message}"); }
             }
@@ -194,7 +196,7 @@ public class LlamaSwapProcessManager : IDisposable
 
             if (apiReady)
             {
-                ApiBaseUrl = DetectApiBaseUrl();
+                ApiBaseUrl = await DetectApiBaseUrlAsync();
                 SetStatus(LlamaSwapStatus.Running);
                 LogMessage?.Invoke($"[manager] llama-swap started (API: {ApiBaseUrl})");
                 return true;
@@ -226,7 +228,7 @@ public class LlamaSwapProcessManager : IDisposable
         {
             var swaps = Process.GetProcessesByName("llama-swap").Select(p => $"llama-swap:{p.Id}").ToList();
             var servers = Process.GetProcessesByName("llama-server").Select(p => $"llama-server:{p.Id}").ToList();
-            var api = DetectApiBaseUrl();
+            var api = Task.Run(async () => await DetectApiBaseUrlAsync()).GetAwaiter().GetResult();
             LogMessage?.Invoke($"[manager] {reason} | api={api ?? "none"} | processes={string.Join(", ", swaps.Concat(servers).DefaultIfEmpty("none"))}");
         }
         catch (Exception ex)
@@ -258,14 +260,12 @@ public class LlamaSwapProcessManager : IDisposable
                 LogMessage?.Invoke($"[manager] graceful stop pid={p.Id} name={p.ProcessName}");
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    // taskkill without /F asks Windows to terminate the process tree before we escalate.
+                    // UseShellExecute=true avoids stdout/stderr redirect deadlock on Windows.
                     var psi = new ProcessStartInfo
                     {
                         FileName = "taskkill.exe",
                         Arguments = $"/T /PID {p.Id}",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
+                        UseShellExecute = true,
                         CreateNoWindow = true,
                         WindowStyle = ProcessWindowStyle.Hidden
                     };
@@ -290,7 +290,7 @@ public class LlamaSwapProcessManager : IDisposable
         var deadline = DateTime.Now.AddSeconds(timeoutSeconds);
         while (DateTime.Now < deadline)
         {
-            if (!IsRunning() && DetectApiBaseUrl() is null)
+            if (!IsRunning() && await DetectApiBaseUrlAsync() is null)
             {
                 LogMessage?.Invoke("[manager] graceful stop completed");
                 ApiBaseUrl = null;
@@ -327,7 +327,7 @@ public class LlamaSwapProcessManager : IDisposable
         var deadline = DateTime.Now.AddSeconds(8);
         while (DateTime.Now < deadline)
         {
-            if (!IsRunning() && DetectApiBaseUrl() is null)
+            if (!IsRunning() && await DetectApiBaseUrlAsync() is null)
             {
                 LogMessage?.Invoke("[manager] all llama processes stopped");
                 ApiBaseUrl = null;
@@ -338,7 +338,7 @@ public class LlamaSwapProcessManager : IDisposable
         }
 
         LogProcessSnapshot("still running after kill");
-        return !IsRunning() && DetectApiBaseUrl() is null;
+        return !IsRunning() && (await DetectApiBaseUrlAsync()) is null;
     }
     public async Task<bool> StopAsync()
     {
@@ -387,7 +387,7 @@ public class LlamaSwapProcessManager : IDisposable
 
     public async Task<string?> GetRunningModelAsync()
     {
-        var baseUrl = DetectApiBaseUrl();
+        var baseUrl = await DetectApiBaseUrlAsync();
         if (baseUrl is null) return null;
 
         try
@@ -409,7 +409,7 @@ public class LlamaSwapProcessManager : IDisposable
 
     private async Task TryUnloadModelAsync()
     {
-        var baseUrl = DetectApiBaseUrl();
+        var baseUrl = await DetectApiBaseUrlAsync();
         if (baseUrl is null) { LogMessage?.Invoke("[manager] unload skipped: API not detected"); return; }
 
         try
@@ -453,7 +453,8 @@ public class LlamaSwapProcessManager : IDisposable
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                Process.Start(psi)?.WaitForExit();
+                var proc = Process.Start(psi);
+                return proc?.WaitForExitAsync() ?? Task.CompletedTask;
             }
             else
             {
@@ -500,7 +501,7 @@ public class LlamaSwapProcessManager : IDisposable
         var deadline = DateTime.Now.AddSeconds(timeoutSeconds);
         while (DateTime.Now < deadline)
         {
-            var baseUrl = DetectApiBaseUrl();
+            var baseUrl = await DetectApiBaseUrlAsync();
             if (baseUrl is not null)
             {
                 try
@@ -527,10 +528,10 @@ public class LlamaSwapProcessManager : IDisposable
         SetStatus(LlamaSwapStatus.Stopped);
     }
 
-    private string? DetectApiBaseUrl()
+    private async Task<string?> DetectApiBaseUrlAsync()
     {
         // llama-swap default port — just test it directly
-        if (TestEndpoint("http://127.0.0.1:8080"))
+        if (await TestEndpointAsync("http://127.0.0.1:8080"))
             return "http://127.0.0.1:8080";
 
         // Fallback: try to find llama-swap process and detect port
@@ -543,7 +544,7 @@ public class LlamaSwapProcessManager : IDisposable
                 foreach (var port in ports)
                 {
                     var baseUrl = $"http://127.0.0.1:{port}";
-                    if (TestEndpoint(baseUrl))
+                    if (await TestEndpointAsync(baseUrl))
                         return baseUrl;
                 }
             }
@@ -558,19 +559,19 @@ public class LlamaSwapProcessManager : IDisposable
     /// The /running response includes a "proxy" field with the llama-server address.
     /// Falls back to port scanning if llama-swap is unreachable or no model is loaded.
     /// </summary>
-    private string? DetectLlamaServerBaseUrl()
+    private async Task<string?> DetectLlamaServerBaseUrlAsync()
     {
         // Primary: query llama-swap /running for the upstream proxy URL
-        var swapBaseUrl = DetectApiBaseUrl();
+        var swapBaseUrl = await DetectApiBaseUrlAsync();
         if (swapBaseUrl is not null)
         {
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                var response = http.GetAsync($"{swapBaseUrl}/running").Result;
+                var response = await http.GetAsync($"{swapBaseUrl}/running");
                 if (response.IsSuccessStatusCode)
                 {
-                    var json = response.Content.ReadAsStringAsync().Result;
+                    var json = await response.Content.ReadAsStringAsync();
                     // Extract "proxy" from the first running entry:
                     // {"running":[{"model":"...","proxy":"http://localhost:5801",...}]}
                     var proxyMatch = System.Text.RegularExpressions.Regex.Match(
@@ -595,7 +596,7 @@ public class LlamaSwapProcessManager : IDisposable
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-                var response = http.GetAsync($"{baseUrl}/health").Result;
+                var response = await http.GetAsync($"{baseUrl}/health");
                 if (response.IsSuccessStatusCode)
                     return baseUrl;
             }
@@ -611,7 +612,7 @@ public class LlamaSwapProcessManager : IDisposable
 
         try
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 var psi = new ProcessStartInfo
                 {
@@ -622,10 +623,17 @@ public class LlamaSwapProcessManager : IDisposable
                     CreateNoWindow = true
                 };
                 using var proc = Process.Start(psi);
+                // Guard against infinite hang: 5s timeout on the whole operation.
+                var exited = proc?.WaitForExit(5000) ?? false;
+                if (!exited)
+                {
+                    try { proc?.Kill(true); } catch { }
+                    return ports;
+                }
                 var output = proc?.StandardOutput.ReadToEnd();
                 if (output is not null)
                 {
-                    foreach (var line in output.Split('\n'))
+                    foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                     {
                         if (int.TryParse(line.Trim(), out var port))
                             ports.Add(port);
@@ -675,12 +683,12 @@ public class LlamaSwapProcessManager : IDisposable
         return ports;
     }
 
-    private bool TestEndpoint(string baseUrl)
+    private async Task<bool> TestEndpointAsync(string baseUrl)
     {
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            var response = http.GetAsync($"{baseUrl}/running").Result;
+            var response = await http.GetAsync($"{baseUrl}/running");
             return response.IsSuccessStatusCode;
         }
         catch { }
@@ -718,7 +726,7 @@ public class LlamaSwapProcessManager : IDisposable
 
     public bool IsProxyRunning()
     {
-        return Process.GetProcessesByName("llama-swap").Length > 0 || DetectApiBaseUrl() is not null;
+        return Process.GetProcessesByName("llama-swap").Length > 0 || ApiBaseUrl is not null;
     }
 
     public void Dispose() { }

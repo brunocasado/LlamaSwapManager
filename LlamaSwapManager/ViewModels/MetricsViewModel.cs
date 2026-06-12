@@ -42,7 +42,7 @@ public partial class MetricsViewModel : ObservableObject, IDisposable
             var baseUrl = _apiBaseUrl;
             if (string.IsNullOrEmpty(baseUrl))
             {
-                baseUrl = DetectLlamaServerBaseUrl();
+                baseUrl = await DetectLlamaServerBaseUrlAsync();
                 if (baseUrl is not null)
                 {
                     _metricsService.SetApiBaseUrl(baseUrl);
@@ -74,7 +74,7 @@ public partial class MetricsViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static string? DetectLlamaServerBaseUrl()
+    private static async Task<string?> DetectLlamaServerBaseUrlAsync()
     {
         // Primary: query llama-swap /running for the upstream proxy URL
         for (var port = 8080; port <= 8090; port++)
@@ -83,10 +83,10 @@ public partial class MetricsViewModel : ObservableObject, IDisposable
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                var response = http.GetAsync($"{swapUrl}/running").Result;
+                var response = await http.GetAsync($"{swapUrl}/running");
                 if (response.IsSuccessStatusCode)
                 {
-                    var json = response.Content.ReadAsStringAsync().Result;
+                    var json = await response.Content.ReadAsStringAsync();
                     var proxyMatch = System.Text.RegularExpressions.Regex.Match(
                         json,
                         "\"proxy\"\\s*:\\s*\"([^\"]+)\"");
@@ -108,7 +108,7 @@ public partial class MetricsViewModel : ObservableObject, IDisposable
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-                var response = http.GetAsync($"{baseUrl}/health").Result;
+                var response = await http.GetAsync($"{baseUrl}/health");
                 if (response.IsSuccessStatusCode)
                     return baseUrl;
             }
