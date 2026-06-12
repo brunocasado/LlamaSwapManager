@@ -52,12 +52,6 @@
                   Classes="warning"
                   Padding="10,4"
                   IsEnabled="{Binding RestartButtonEnabled}" />
-          <Button Content="Refresh"
-                  Command="{Binding RefreshCommand}"
-                  Padding="10,4" />
-          <Button Content="Metrics"
-                  Command="{Binding NavigateToMetricsCommand}"
-                  Padding="10,4" />
         </StackPanel>
       </DockPanel>
     </Border>
