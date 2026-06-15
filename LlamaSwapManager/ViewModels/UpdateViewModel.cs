@@ -235,7 +235,7 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
         _updateCts = new CancellationTokenSource();
 
-          try
+        try
         {
             var success = await _llamaCppDownloader.DownloadAndInstallAsync(
                 LlamaCppDirectory,
