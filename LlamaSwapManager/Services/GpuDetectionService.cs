@@ -101,7 +101,9 @@ public static class GpuDetectionService
         if (!string.IsNullOrEmpty(nvidiaSmi))
         {
             var gpuName = nvidiaSmi.Trim().Split('\n').FirstOrDefault()?.Trim() ?? "NVIDIA GPU";
-            backends.Add(new GpuBackendInfo(GpuBackend.Cuda, "NVIDIA CUDA", $"Detected: {gpuName}", 1));
+            var cudaVersion = CudaVersionDetector.GetCudaVersion();
+            var detail = cudaVersion != null ? $"Detected: {gpuName} (CUDA {cudaVersion})" : $"Detected: {gpuName}";
+            backends.Add(new GpuBackendInfo(GpuBackend.Cuda, "NVIDIA CUDA", detail, 1));
         }
 
         // 2. AMD ROCm — check if rocm-smi exists
@@ -140,7 +142,9 @@ public static class GpuDetectionService
         if (!string.IsNullOrEmpty(nvidiaSmi))
         {
             var gpuName = nvidiaSmi.Trim().Split('\n').FirstOrDefault()?.Trim() ?? "NVIDIA GPU";
-            backends.Add(new GpuBackendInfo(GpuBackend.Cuda, "NVIDIA CUDA", $"Detected: {gpuName}", 1));
+            var cudaVersion = CudaVersionDetector.GetCudaVersion();
+            var detail = cudaVersion != null ? $"Detected: {gpuName} (CUDA {cudaVersion})" : $"Detected: {gpuName}";
+            backends.Add(new GpuBackendInfo(GpuBackend.Cuda, "NVIDIA CUDA", detail, 1));
         }
 
         // 2. AMD ROCm — check for rocm-smi or /opt/rocm

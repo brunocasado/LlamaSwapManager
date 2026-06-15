@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,24 +63,24 @@ public class LlamaCppDownloader : IDisposable
         var tag = release?.GetProperty("tag_name").GetString() ?? "";
         LogMessage?.Invoke($"[llama.cpp] Latest version: {tag}");
 
-        // Step 2: Detect the right asset for current platform
+        // Step 2: Detect the right asset for current platform (includes CUDA version-aware selection)
         progress?.Report(0.15);
-         var assetInfo = DetectAssetForPlatform(tag, release);
+        var assetInfo = DetectAssetForPlatform(tag, release);
         if (assetInfo == null)
         {
             LogMessage?.Invoke("[llama.cpp] No suitable asset found for this platform");
             return false;
         }
 
-        LogMessage?.Invoke($"[llama.cpp] Selected asset: {assetInfo.Value.Name} ({FormatSize(assetInfo.Value.Size)})");
+        LogMessage?.Invoke($"[llama.cpp] Selected asset: {assetInfo.Name} ({FormatSize(assetInfo.Size)})");
 
         // Step 3: Create temp download directory
         var tempDir = CreateTempDirectory(tag);
-        var archivePath = Path.Combine(tempDir, assetInfo.Value.Name);
+        var archivePath = Path.Combine(tempDir, assetInfo.Name);
 
         // Step 4: Download the archive
         progress?.Report(0.20);
-        var downloadOk = await DownloadAssetAsync(assetInfo.Value.Url, archivePath, progress, ct);
+        var downloadOk = await DownloadAssetAsync(assetInfo.Url, archivePath, progress, ct);
         if (!downloadOk || ct.IsCancellationRequested)
         {
             LogMessage?.Invoke("[llama.cpp] Download failed or cancelled");
@@ -89,7 +90,7 @@ public class LlamaCppDownloader : IDisposable
 
         // Step 5: Verify SHA-256 checksum
         progress?.Report(0.70);
-        var checksumOk = await VerifyChecksumAsync(archivePath, assetInfo.Value.Digest, ct);
+        var checksumOk = await VerifyChecksumAsync(archivePath, assetInfo.Digest, ct);
         if (!checksumOk)
         {
             LogMessage?.Invoke("[llama.cpp] Checksum verification failed — aborting");
@@ -105,6 +106,13 @@ public class LlamaCppDownloader : IDisposable
 
         // Clean up temp directory
         DeleteDirectory(tempDir);
+
+        // Step 7: Download CUDA runtime libraries (non-critical, only for CUDA backend)
+        if (installOk && IsCudaBackend() && assetInfo.CudartAssets.Any())
+        {
+            progress?.Report(0.90);
+            await DownloadCudaRuntimeAsync(assetInfo.CudartAssets.FirstOrDefault(), targetDirectory, ct);
+        }
 
         if (installOk)
         {
@@ -178,7 +186,7 @@ public class LlamaCppDownloader : IDisposable
 
     // ---- Asset Detection ----
 
-   private (string Name, long Size, string Url, string Digest)? DetectAssetForPlatform(
+    private DetectedAsset? DetectAssetForPlatform(
         string tag, JsonElement? release)
     {
         // macOS: always use platform-specific build (Metal built-in)
@@ -188,6 +196,8 @@ public class LlamaCppDownloader : IDisposable
                          RuntimeInformation.ProcessArchitecture == Architecture.X64;
 
         var patterns = new List<string?>();
+        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        var isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
         if (isMacArm)
         {
@@ -197,7 +207,7 @@ public class LlamaCppDownloader : IDisposable
         {
             patterns.Add("-macos-x64-");
         }
-        else
+        else if (isWindows || isLinux)
         {
             // Windows/Linux: use user preference or auto-detect
             var effectiveBackend = GpuDetectionSettings.GetEffectiveBackend();
@@ -209,7 +219,7 @@ public class LlamaCppDownloader : IDisposable
             var detected = GpuDetectionService.DetectBackends();
             foreach (var gpu in detected)
             {
-                if (gpu.Backend == effectiveBackend) continue; // already added
+                if (gpu.Backend == effectiveBackend) continue;
                 var pattern = GpuDetectionService.GetPreferredAssetPattern(gpu.Backend);
                 if (pattern != null && !patterns.Contains(pattern))
                     patterns.Add(pattern);
@@ -218,7 +228,7 @@ public class LlamaCppDownloader : IDisposable
 
         if (release == null)
         {
-            LogMessage?.Invoke("[llama.cpp] No assets property found in release");
+            LogMessage?.Invoke("[llama.cpp] No release info found");
             return null;
         }
 
@@ -235,6 +245,42 @@ public class LlamaCppDownloader : IDisposable
             return null;
         }
 
+        // Parse CUDA assets for version-aware selection
+        var allCudaAssets = ParseCudaAssets(release.Value);
+        var cudartAssets = allCudaAssets.Where(a => a.AssetType == CudaAssetType.Cudart).ToList();
+
+        // For CUDA backend on Windows/Linux, use version-aware asset selection
+        if (isWindows || isLinux)
+        {
+            var effectiveBackend = GpuDetectionSettings.GetEffectiveBackend();
+
+            if (effectiveBackend == GpuDetectionService.GpuBackend.Cuda)
+            {
+                var cudaVersion = CudaVersionDetector.GetCudaVersion();
+                var llamaCudaAssets = allCudaAssets.Where(a => a.AssetType == CudaAssetType.LlamaBuild).ToList();
+
+                if (llamaCudaAssets.Any() && !string.IsNullOrEmpty(cudaVersion))
+                {
+                    // Version-aware selection for CUDA builds
+                    var bestAsset = FindBestCudaAsset(llamaCudaAssets, cudaVersion);
+                    if (bestAsset != null)
+                    {
+                        LogMessage?.Invoke($"[llama.cpp] CUDA version-aware selection: {bestAsset.Name}");
+                        return new DetectedAsset(
+                            bestAsset.Name,
+                            bestAsset.Size,
+                            bestAsset.Url,
+                            bestAsset.Digest,
+                            cudartAssets);
+                    }
+                }
+            }
+        }
+
+        // Non-CUDA path: use existing pattern-based detection
+        var arch = RuntimeInformation.ProcessArchitecture;
+        var archFilter = arch == Architecture.Arm64 ? "arm64" : "x64";
+
         // Try each pattern in priority order
         foreach (var pattern in patterns)
         {
@@ -243,17 +289,17 @@ public class LlamaCppDownloader : IDisposable
             foreach (var asset in assetArray)
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
-                var arch = RuntimeInformation.ProcessArchitecture;
-                var archFilter = arch == Architecture.Arm64 ? "arm64" : "x64";
 
                 // Match pattern + architecture + correct archive format
                 if (name.Contains(pattern) &&
                     name.EndsWith(".tar.gz") &&
                     name.Contains(archFilter))
                 {
-                    return (name, asset.GetProperty("size").GetInt64(),
+                    return new DetectedAsset(
+                        name, asset.GetProperty("size").GetInt64(),
                         asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "");
+                        asset.GetProperty("digest").GetString() ?? "",
+                        cudartAssets);
                 }
             }
         }
@@ -266,40 +312,54 @@ public class LlamaCppDownloader : IDisposable
                 var name = asset.GetProperty("name").GetString() ?? "";
                 if (name.Contains("-macos-") && name.EndsWith(".tar.gz") && !name.Contains("xcframework"))
                 {
-                    return (name, asset.GetProperty("size").GetInt64(),
+                    return new DetectedAsset(
+                        name, asset.GetProperty("size").GetInt64(),
                         asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "");
+                        asset.GetProperty("digest").GetString() ?? "",
+                        cudartAssets);
                 }
             }
         }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        else if (isWindows)
         {
             foreach (var asset in assetArray)
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
                 if (name.Contains("-win-cpu-x64-") && name.EndsWith(".zip"))
                 {
-                    return (name, asset.GetProperty("size").GetInt64(),
+                    return new DetectedAsset(
+                        name, asset.GetProperty("size").GetInt64(),
                         asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "");
+                        asset.GetProperty("digest").GetString() ?? "",
+                        cudartAssets);
                 }
             }
         }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        else if (isLinux)
         {
             foreach (var asset in assetArray)
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
                 if (name.Contains("-ubuntu-x64-") && name.EndsWith(".tar.gz"))
                 {
-                    return (name, asset.GetProperty("size").GetInt64(),
+                    return new DetectedAsset(
+                        name, asset.GetProperty("size").GetInt64(),
                         asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "");
+                        asset.GetProperty("digest").GetString() ?? "",
+                        cudartAssets);
                 }
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Check if the current backend is CUDA-based.
+    /// </summary>
+    private static bool IsCudaBackend()
+    {
+        return GpuDetectionSettings.GetEffectiveBackend() == GpuDetectionService.GpuBackend.Cuda;
     }
 
     // ---- Download ----
@@ -841,6 +901,237 @@ public class LlamaCppDownloader : IDisposable
     {
         _http?.Dispose();
     }
+
+    // ---- CUDA Version-Aware Asset Selection ----
+
+    /// <summary>
+    /// Represents a CUDA-related asset parsed from a GitHub release.
+    /// </summary>
+    internal record CudaAsset(
+        string Name,
+        string Url,
+        long Size,
+        string Digest,
+        CudaAssetType AssetType,
+        string CudaVersion);
+
+    /// <summary>
+    /// Type of CUDA asset: llama build or cudart runtime.
+    /// </summary>
+    internal enum CudaAssetType
+    {
+        LlamaBuild,
+        Cudart
+    }
+
+    /// <summary>
+    /// Result of asset detection, including the main asset and any associated cudart assets.
+    /// </summary>
+    internal record DetectedAsset(
+        string Name,
+        long Size,
+        string Url,
+        string Digest,
+        IReadOnlyList<CudaAsset> CudartAssets);
+
+    /// <summary>
+    /// Regex to parse CUDA version from asset names like "llama-cuda12.4-win-cuda-12.4-x64-release.tar.gz".
+    /// Captures major.minor (and optional patch) as group 1.
+    /// </summary>
+    private static readonly Regex CudaAssetVersionRegex = new(
+        @"cuda(\d+\.\d+(?:\.\d+)?)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Regex to match cudart runtime assets.
+    /// Matches patterns like "cudart-cuda12.4-win-12.4-x64.tar.gz" or "cudart-cuda-12.4-ubuntu-x64.tar.gz".
+    /// </summary>
+    private static readonly Regex CudartAssetRegex = new(
+        @"cudart-cuda[\-_](\d+\.\d+(?:\.\d+)?)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Regex to match llama CUDA build assets (not cudart).
+    /// Matches patterns like "llama-cuda12.4-win-cuda-12.4-x64-release.tar.gz".
+    /// </summary>
+    private static readonly Regex LlamaCudaBuildRegex = new(
+        @"llama-cuda\d+.*?cuda-\d+\.\d+(?:\.\d+)?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Parse CUDA-related assets from a GitHub release.
+    /// Returns both llama CUDA builds and cudart runtime assets.
+    /// </summary>
+    private List<CudaAsset> ParseCudaAssets(JsonElement release)
+    {
+        var cudaAssets = new List<CudaAsset>();
+
+        if (!release.TryGetProperty("assets", out var assets))
+            return cudaAssets;
+
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.GetProperty("name").GetString() ?? "";
+
+            // Check for cudart runtime assets
+            var cudartMatch = CudartAssetRegex.Match(name);
+            if (cudartMatch.Success)
+            {
+                var cudaVersion = cudartMatch.Groups[1].Value;
+                cudaAssets.Add(new CudaAsset(
+                    name,
+                    asset.GetProperty("browser_download_url").GetString() ?? "",
+                    asset.GetProperty("size").GetInt64(),
+                    asset.GetProperty("digest").GetString() ?? "",
+                    CudaAssetType.Cudart,
+                    cudaVersion));
+                continue;
+            }
+
+            // Check for llama CUDA build assets
+            if (LlamaCudaBuildRegex.IsMatch(name) ||
+                (name.Contains("cuda", StringComparison.OrdinalIgnoreCase) &&
+                 name.Contains("llama", StringComparison.OrdinalIgnoreCase)))
+            {
+                var versionMatch = CudaAssetVersionRegex.Match(name);
+                if (versionMatch.Success)
+                {
+                    var cudaVersion = versionMatch.Groups[1].Value;
+                    cudaAssets.Add(new CudaAsset(
+                        name,
+                        asset.GetProperty("browser_download_url").GetString() ?? "",
+                        asset.GetProperty("size").GetInt64(),
+                        asset.GetProperty("digest").GetString() ?? "",
+                        CudaAssetType.LlamaBuild,
+                        cudaVersion));
+                }
+            }
+        }
+
+        return cudaAssets;
+    }
+
+    /// <summary>
+    /// Find the best CUDA asset matching the installed CUDA version.
+    /// Priority: exact match → same major version → newest available.
+    /// </summary>
+    private CudaAsset? FindBestCudaAsset(List<CudaAsset> cudaAssets, string installedCudaVersion)
+    {
+        if (!cudaAssets.Any())
+            return null;
+
+        var installedParts = installedCudaVersion.Split('.');
+        var installedMajor = installedParts[0];
+        var installedMinor = installedParts.Length > 1 ? installedParts[1] : "0";
+
+        // 1. Exact match
+        var exactMatch = cudaAssets.FirstOrDefault(a => a.CudaVersion == installedCudaVersion);
+        if (exactMatch != null)
+        {
+            LogMessage?.Invoke($"[llama.cpp] Found exact CUDA {installedCudaVersion} asset: {exactMatch.Name}");
+            return exactMatch;
+        }
+
+        // 2. Major version match (e.g. CUDA 12.6 → 12.4)
+        var majorMatches = cudaAssets
+            .Where(a => a.CudaVersion.Split('.')[0] == installedMajor)
+            .ToList();
+
+        if (majorMatches.Any())
+        {
+            // Pick the highest minor version among major matches
+            var best = majorMatches.OrderByDescending(a => ParseVersionComponents(a.CudaVersion)).ToList()[0];
+            LogMessage?.Invoke($"[llama.cpp] No exact CUDA match for {installedCudaVersion}, using CUDA {best.CudaVersion} asset: {best.Name}");
+            return best;
+        }
+
+        // 3. Fallback: newest available
+        var newest = cudaAssets.OrderByDescending(a => ParseVersionComponents(a.CudaVersion)).First();
+        LogMessage?.Invoke($"[llama.cpp] No CUDA {installedMajor}.x match, using newest available: {newest.Name}");
+        return newest;
+    }
+
+    /// <summary>
+    /// Parse version components for comparison. Returns (major * 1000 + minor, patch).
+    /// </summary>
+    private static (int majorMinor, int patch) ParseVersionComponents(string version)
+    {
+        var parts = version.Split('.');
+        var major = int.TryParse(parts[0], out var m) ? m : 0;
+        var minor = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 0;
+        var patch = parts.Length > 2 && int.TryParse(parts[2], out var p) ? p : 0;
+        return (major * 1000 + minor, patch);
+    }
+
+    /// <summary>
+    /// Download and extract cudart runtime libraries from the matched asset.
+    /// Non-critical — failures are logged but don't block installation.
+    /// </summary>
+    private async Task<bool> DownloadCudaRuntimeAsync(
+        CudaAsset? cudartAsset,
+        string targetDirectory,
+        CancellationToken ct)
+    {
+        if (cudartAsset == null)
+        {
+            LogMessage?.Invoke("[llama.cpp] No cudart asset to download");
+            return true;
+        }
+
+        try
+        {
+            LogMessage?.Invoke($"[llama.cpp] Downloading CUDA {cudartAsset.CudaVersion} runtime libraries...");
+
+            // Create temp file for the cudart archive
+            var tempArchive = Path.Combine(_downloadsDir, $"cudart-{cudartAsset.CudaVersion}.tar.gz");
+
+            // Download the cudart archive
+            using var response = await _http.GetAsync(cudartAsset.Url, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                LogMessage?.Invoke($"[llama.cpp] cudart download failed: {(int)response.StatusCode} {response.StatusCode}");
+                return false;
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var fileStream = new FileStream(tempArchive, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+            await stream.CopyToAsync(fileStream, 81920, ct);
+
+            // Extract to target directory
+            var stagingDir = Path.Combine(_downloadsDir, "cudart-staging");
+            Directory.CreateDirectory(stagingDir);
+
+            try
+            {
+                await ExtractTarGzAsync(tempArchive, stagingDir, ct);
+
+                // Copy extracted files to target directory
+                CopyDirectoryContents(stagingDir, targetDirectory);
+                LogMessage?.Invoke("[llama.cpp] CUDA runtime libraries installed");
+
+                // Make binaries executable on Unix
+                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    MakeBinariesExecutable(targetDirectory);
+                }
+            }
+            finally
+            {
+                // Clean up staging and temp archive
+                DeleteDirectory(stagingDir);
+                try { File.Delete(tempArchive); } catch { }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[llama.cpp] cudart download error (non-fatal): {ex.Message}");
+            return false;
+        }
+    }
+
+    // ---- End CUDA Version-Aware Asset Selection ----
 }
 
 // Minimal tar.gz reader (since System.IO.Compression doesn't include TarFile in .NET 9 on all platforms)
