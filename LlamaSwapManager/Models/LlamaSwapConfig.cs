@@ -237,6 +237,12 @@ public class AutoUpdateConfig
 
     [YamlMember(Alias = "autoDownload")]
     public bool AutoDownload { get; set; } = false;
+
+    /// <summary>
+    /// Forced CUDA toolkit version for llama.cpp downloads. Null or empty = auto-detect.
+    /// </summary>
+    [YamlMember(Alias = "cudaVersion")]
+    public string? CudaVersion { get; set; }
 }
 
 /// <summary>

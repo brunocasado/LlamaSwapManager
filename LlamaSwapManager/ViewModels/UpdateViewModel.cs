@@ -21,6 +21,7 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
     private readonly UpdateService _updateService;
     private readonly LlamaCppDownloader _llamaCppDownloader;
     private readonly Action<string>? _logMessage;
+    private readonly string? _preferredCudaVersion;
     private CancellationTokenSource? _updateCts;
     private bool _disposed;
 
@@ -58,13 +59,14 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
     public ICommand LlamaCppCheckCommand { get; }
     public ICommand LlamaCppUpdateCommand { get; }
 
-    public UpdateViewModel(string installDirectory, string? llamaCppDirectory = null, Action<string>? logMessage = null)
+    public UpdateViewModel(string installDirectory, string? llamaCppDirectory = null, Action<string>? logMessage = null, string? preferredCudaVersion = null)
     {
         InstallDirectory = installDirectory;
         LlamaCppDirectory = llamaCppDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
         _logMessage = logMessage;
         _updateService = new UpdateService(installDirectory);
         _llamaCppDownloader = new LlamaCppDownloader();
+        _preferredCudaVersion = preferredCudaVersion;
 
         _updateService.ProgressChanged += OnProgressChanged;
         _updateService.LogMessage += OnLogMessage;
@@ -233,12 +235,13 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
         _updateCts = new CancellationTokenSource();
 
-        try
+          try
         {
             var success = await _llamaCppDownloader.DownloadAndInstallAsync(
                 LlamaCppDirectory,
                 new Progress<double>(p => ProgressPercentage = (int)(p * 100)),
-                _updateCts.Token);
+                _updateCts.Token,
+                _preferredCudaVersion);
 
             if (success)
             {

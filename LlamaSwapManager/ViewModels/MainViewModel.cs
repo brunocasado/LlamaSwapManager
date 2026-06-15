@@ -57,6 +57,13 @@ public partial class MainViewModel : ObservableObject
     private readonly List<string> _gpuBackendOptions = new();
     public IReadOnlyList<string> GpuBackendOptions => _gpuBackendOptions;
 
+    // CUDA version detection
+    [ObservableProperty] private string _cudaVersion = "";
+    [ObservableProperty] private string _cudaVersionStatus = "";
+    [ObservableProperty] private string _cudaVersionStatusColor = "#888888";
+    private readonly List<string> _cudaVersionOptions = new();
+    public IReadOnlyList<string> CudaVersionOptions => _cudaVersionOptions;
+
     // Logs
     [ObservableProperty] private ObservableCollection<string> _logMessages = new();
     [ObservableProperty] private string _logText = "";
@@ -218,10 +225,13 @@ public partial class MainViewModel : ObservableObject
          // Initialize update subsystem after paths are resolved
         var updateDir = _processManager.ExecutablePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
         var llamaCppDir = _processManager.LlamaCppDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
-        UpdateViewModel = new UpdateViewModel(updateDir, llamaCppDir, message => OnLogMessage(message));
+        UpdateViewModel = new UpdateViewModel(updateDir, llamaCppDir, message => OnLogMessage(message), CudaVersion);
 
         // Detect GPU backends
         DetectGpuBackends();
+
+        // Detect CUDA version
+        DetectCudaVersion();
 
         Status = LlamaSwapStatus.Stopped;
         UpdateUI();
@@ -290,6 +300,39 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    private void DetectCudaVersion()
+    {
+        try
+        {
+            _cudaVersionOptions.Clear();
+            var detectedVersion = CudaVersionDetector.GetCudaVersion();
+
+            if (!string.IsNullOrEmpty(detectedVersion))
+            {
+                _cudaVersionOptions.Add("Auto-detect");
+                _cudaVersionOptions.Add(detectedVersion);
+                CudaVersion = detectedVersion;
+                CudaVersionStatus = $"CUDA {detectedVersion} detected";
+                CudaVersionStatusColor = "#A6E3A1";
+            }
+            else
+            {
+                _cudaVersionOptions.Add("Auto-detect");
+                CudaVersion = "";
+                CudaVersionStatus = "CUDA not found — will auto-detect at runtime";
+                CudaVersionStatusColor = "#F9E2AF";
+            }
+        }
+        catch (Exception ex)
+        {
+            _cudaVersionOptions.Clear();
+            _cudaVersionOptions.Add("Auto-detect");
+            CudaVersion = "";
+            CudaVersionStatus = $"Error detecting CUDA: {ex.Message}";
+            CudaVersionStatusColor = "#F38BA8";
+        }
+    }
+
     private void LoadConfigFromPath(string configPath)
     {
         var config = ConfigService.LoadConfig(configPath);
@@ -351,6 +394,24 @@ public partial class MainViewModel : ObservableObject
         if (!string.IsNullOrEmpty(config.LogLevel)) LogLevel = config.LogLevel;
         if (config.GlobalTTL.HasValue) GlobalTtl = config.GlobalTTL.Value.ToString();
         if (config.SendLoadingState.HasValue) SendLoadingState = config.SendLoadingState.Value;
+
+        // Parse auto-update CUDA version preference
+        if (config.AutoUpdate != null && !string.IsNullOrEmpty(config.AutoUpdate.CudaVersion))
+        {
+            var savedVersion = config.AutoUpdate.CudaVersion;
+            if (_cudaVersionOptions.Contains(savedVersion))
+            {
+                CudaVersion = savedVersion;
+                CudaVersionStatus = savedVersion == "Auto-detect" ? "Using auto-detect" : $"Using CUDA {savedVersion}";
+                CudaVersionStatusColor = savedVersion == "Auto-detect" ? "#A6E3A1" : "#B4BEFE";
+            }
+            else
+            {
+                CudaVersion = savedVersion;
+                CudaVersionStatus = $"Saved version {savedVersion} (may not match available)";
+                CudaVersionStatusColor = "#F9E2AF";
+            }
+        }
 
         SyncMatrixTextFromCollections();
         RebuildMatrixCombinationsFromSets();
@@ -949,6 +1010,10 @@ public partial class MainViewModel : ObservableObject
         config.GlobalTTL = string.IsNullOrEmpty(GlobalTtl) || GlobalTtl == "0" ? null : int.Parse(GlobalTtl);
         config.SendLoadingState = SendLoadingState;
         config.LogFile ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap", "upstream.log");
+
+        // Auto-update settings — initialize if missing
+        config.AutoUpdate ??= new AutoUpdateConfig();
+        config.AutoUpdate.CudaVersion = string.IsNullOrWhiteSpace(CudaVersion) ? null : CudaVersion;
 
         return config;
     }

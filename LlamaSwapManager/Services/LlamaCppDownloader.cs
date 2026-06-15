@@ -42,11 +42,13 @@ public class LlamaCppDownloader : IDisposable
     /// <param name="targetDirectory">Directory where llama.cpp binaries should be installed (e.g. ~/.llama/).</param>
     /// <param name="progress">Progress reporter (0.0 to 1.0).</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="preferredCudaVersion">Optional forced CUDA version (e.g. "12.4"). Null = auto-detect.</param>
     /// <returns>True if install succeeded, false otherwise.</returns>
     public async Task<bool> DownloadAndInstallAsync(
         string targetDirectory,
         IProgress<double>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? preferredCudaVersion = null)
     {
         progress?.Report(0.0);
         LogMessage?.Invoke("[llama.cpp] Starting download of latest release...");
@@ -65,7 +67,7 @@ public class LlamaCppDownloader : IDisposable
 
         // Step 2: Detect the right asset for current platform (includes CUDA version-aware selection)
         progress?.Report(0.15);
-        var assetInfo = DetectAssetForPlatform(tag, release);
+        var assetInfo = DetectAssetForPlatform(tag, release, preferredCudaVersion);
         if (assetInfo == null)
         {
             LogMessage?.Invoke("[llama.cpp] No suitable asset found for this platform");
@@ -187,7 +189,7 @@ public class LlamaCppDownloader : IDisposable
     // ---- Asset Detection ----
 
     private DetectedAsset? DetectAssetForPlatform(
-        string tag, JsonElement? release)
+        string tag, JsonElement? release, string? preferredCudaVersion = null)
     {
         // macOS: always use platform-specific build (Metal built-in)
         var isMacArm = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
@@ -256,7 +258,7 @@ public class LlamaCppDownloader : IDisposable
 
             if (effectiveBackend == GpuDetectionService.GpuBackend.Cuda)
             {
-                var cudaVersion = CudaVersionDetector.GetCudaVersion();
+                var cudaVersion = preferredCudaVersion ?? CudaVersionDetector.GetCudaVersion();
                 var llamaCudaAssets = allCudaAssets.Where(a => a.AssetType == CudaAssetType.LlamaBuild).ToList();
 
                 if (llamaCudaAssets.Any() && !string.IsNullOrEmpty(cudaVersion))
@@ -265,7 +267,8 @@ public class LlamaCppDownloader : IDisposable
                     var bestAsset = FindBestCudaAsset(llamaCudaAssets, cudaVersion);
                     if (bestAsset != null)
                     {
-                        LogMessage?.Invoke($"[llama.cpp] CUDA version-aware selection: {bestAsset.Name}");
+                        var source = preferredCudaVersion != null ? $"forced ({preferredCudaVersion})" : "auto-detected";
+                        LogMessage?.Invoke($"[llama.cpp] CUDA version-aware selection ({source}): {bestAsset.Name}");
                         return new DetectedAsset(
                             bestAsset.Name,
                             bestAsset.Size,

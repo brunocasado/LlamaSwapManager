@@ -745,6 +745,23 @@
               </StackPanel>
             </Border>
 
+            <!-- CUDA Version -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="12">
+                <TextBlock Text="CUDA Version" FontSize="15" FontWeight="Bold" Foreground="#B4BEFE" />
+                <TextBlock Text="Override the detected CUDA toolkit version. Leave on Auto-detect to use the detected version." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="200,*" RowSpacing="10">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="CUDA Version" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CudaVersionOptions}" SelectedItem="{Binding CudaVersion}" />
+                  <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CudaVersionStatus}" FontSize="11" Foreground="{Binding CudaVersionStatusColor}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
             <!-- Info -->
             <Border Padding="16" Background="#313244" CornerRadius="8">
               <StackPanel Spacing="8">
