@@ -160,8 +160,8 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
             var output = await proc.StandardOutput.ReadToEndAsync();
             await proc.WaitForExitAsync();
 
-            // Try to extract version number from output like "llama-swap v224" or "v224"
-            var match = System.Text.RegularExpressions.Regex.Match(output, @"v?(\d+)");
+            // Try to extract version number from output like "version: 223 (hash)"
+            var match = System.Text.RegularExpressions.Regex.Match(output, @"version:\s*(\d+)");
             if (match.Success)
                 return $"v{match.Groups[1].Value}";
 
@@ -250,9 +250,9 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
                 LlamaCppUpdateButtonEnabled = false;
                 _logMessage?.Invoke("llama.cpp updated successfully. Restart llama-swap to apply.");
 
-                // Refresh version display
+                // Refresh version display — detect the local version after install
                 var result = await _llamaCppDownloader.CheckForUpdateAsync(LlamaCppDirectory);
-                LlamaCppCurrentVersion = result.RemoteVersion ?? "Unknown";
+                LlamaCppCurrentVersion = result.LocalVersion ?? "Unknown";
             }
             else
             {

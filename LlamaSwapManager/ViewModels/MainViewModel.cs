@@ -223,7 +223,10 @@ public partial class MainViewModel : ObservableObject
             LlamaServerPath = defaultServerPath;
 
          // Initialize update subsystem after paths are resolved
-        var updateDir = _processManager.ExecutablePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
+        // ExecutablePath is the full binary path — extract directory for UpdateViewModel
+        var updateDir = _processManager.ExecutablePath != null
+            ? Path.GetDirectoryName(_processManager.ExecutablePath)!
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
         var llamaCppDir = _processManager.LlamaCppDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
         UpdateViewModel = new UpdateViewModel(updateDir, llamaCppDir, message => OnLogMessage(message), CudaVersion);
 
