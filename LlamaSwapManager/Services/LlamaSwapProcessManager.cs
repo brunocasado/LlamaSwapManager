@@ -38,9 +38,21 @@ public class LlamaSwapProcessManager : IDisposable
     public string? LlamaServerBaseUrl { get; private set; }
     public string? LlamaSwapExePath => ExecutablePath;
     public string? DetectedApiBaseUrl => ApiBaseUrl;
+    public string? LlamaCppDirectory { get; private set; }
     public string AppDirectory { get; }
     public string UserDirectory { get; }
     public string? WorkingDirectory { get; private set; }
+
+    private LlamaCppDownloader? _llamaCppDownloader;
+    public LlamaCppDownloader GetDownloader(string? userDirectory = null)
+    {
+        if (_llamaCppDownloader == null)
+        {
+            _llamaCppDownloader = new LlamaCppDownloader(userDirectory ?? UserDirectory);
+            _llamaCppDownloader.LogMessage += s => LogMessage?.Invoke(s);
+        }
+        return _llamaCppDownloader;
+    }
 
     public LlamaSwapProcessManager(string? appDirectory = null, string? userDirectory = null)
     {
@@ -60,6 +72,65 @@ public class LlamaSwapProcessManager : IDisposable
         else
             WorkingDirectory = AppDirectory;
 
+        ResolveLlamaServerPath();
+    }
+
+    /// <summary>
+    /// Resolves the llama.cpp binary directory by inspecting the default path
+    /// and common installation locations.
+    /// </summary>
+    public void ResolveLlamaServerPath()
+    {
+        // Check the default ~/.llama/ directory first
+        var defaultPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
+        if (Directory.Exists(defaultPath))
+        {
+            // Check if it contains llama-server binary
+            var serverPath = Path.Combine(defaultPath, "llama-server");
+            if (File.Exists(serverPath))
+            {
+                LlamaCppDirectory = defaultPath;
+                return;
+            }
+        }
+
+        // Check ~/.llama-swap/ for llama.cpp
+        var swapPath = Path.Combine(UserDirectory, "llama.cpp");
+        if (Directory.Exists(swapPath))
+        {
+            var serverPath = Path.Combine(swapPath, "llama-server");
+            if (File.Exists(serverPath))
+            {
+                LlamaCppDirectory = swapPath;
+                return;
+            }
+        }
+
+        // Check if llama-server is in the llama-swap app directory
+        if (Directory.Exists(AppDirectory))
+        {
+            var serverPath = Path.Combine(AppDirectory, "llama-server");
+            if (File.Exists(serverPath))
+            {
+                LlamaCppDirectory = AppDirectory;
+                return;
+            }
+        }
+
+        // Check PATH for llama-server
+        var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (var dir in pathEnv.Split(Path.PathSeparator))
+        {
+            var fullPath = Path.Combine(dir, "llama-server");
+            if (File.Exists(fullPath))
+            {
+                LlamaCppDirectory = dir;
+                return;
+            }
+        }
+
+        LlamaCppDirectory = null;
     }
 
     public void RefreshPaths() => ResolvePaths();

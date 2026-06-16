@@ -46,15 +46,18 @@ public partial class App : Application
     }
 
     private void SetupTrayIcon(Window mainWindow, MainViewModel vm)
-    {
-        try
-        {
-            var uri = new Uri("avares://LlamaSwapManager.Desktop/Assets/llama.png");
-            using var stream = AssetLoader.Open(uri);
-            var icon = new WindowIcon(stream);
+     {
+         try
+         {
+             // macOS tray icons require template (monochrome + alpha) images.
+             // Use the grayscale version for the tray; the color version stays
+             // as the window icon in MainWindow.axaml.
+             var uri = new Uri("avares://LlamaSwapManager.Desktop/Assets/llama_tray_gray_44.png");
+             using var stream = AssetLoader.Open(uri);
+             var icon = new WindowIcon(stream);
 
-            // ---- Tray Menu Items ----
-            var showItem = new NativeMenuItem("Show")
+             // ---- Tray Menu Items ----
+             var showItem = new NativeMenuItem("Show")
             {
                 Command = new AsyncRelayCommand(() =>
                 {

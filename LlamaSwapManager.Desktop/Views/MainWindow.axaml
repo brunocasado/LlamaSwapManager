@@ -6,6 +6,7 @@
         x:Class="LlamaSwapManager.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="Llama Swap Manager"
+        Icon="avares://LlamaSwapManager.Desktop/Assets/llama.ico"
         Width="1200"
         Height="800"
         MinWidth="1000"
@@ -695,7 +696,7 @@
               </StackPanel>
             </Border>
 
-            <!-- General -->
+              <!-- General -->
             <Border Padding="16" Background="#313244" CornerRadius="8">
               <StackPanel Spacing="12">
                 <TextBlock Text="General" FontSize="15" FontWeight="Bold" Foreground="#B4BEFE" />
@@ -727,6 +728,38 @@
               </StackPanel>
             </Border>
 
+            <!-- GPU Backend -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="12">
+                <TextBlock Text="GPU Acceleration" FontSize="15" FontWeight="Bold" Foreground="#B4BEFE" />
+                <TextBlock Text="Select which GPU backend to use for llama.cpp. Auto-detection picks the best available." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="200,*" RowSpacing="10">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="Preferred Backend" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding GpuBackendOptions}" SelectedItem="{Binding SelectedGpuBackend}" />
+                  <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding GpuDetectionStatus}" FontSize="11" Foreground="{Binding GpuDetectionStatusColor}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- CUDA Version (shown when CUDA backend is selected) -->
+            <Border Padding="16" Background="#313244" CornerRadius="8" IsVisible="{Binding IsCudaVersionVisible}">
+              <StackPanel Spacing="12">
+                <TextBlock Text="CUDA Version" FontSize="15" FontWeight="Bold" Foreground="#B4BEFE" />
+                <TextBlock Text="llama.cpp bundles its own CUDA runtime DLLs. Choose which build to download." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="200,*" RowSpacing="10">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="CUDA Version" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
+                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CudaVersionOptions}" SelectedItem="{Binding CudaVersion}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
             <!-- Info -->
             <Border Padding="16" Background="#313244" CornerRadius="8">
               <StackPanel Spacing="8">
@@ -735,6 +768,105 @@
                 <TextBlock Text="• Vars map short names (q, m, d, t, e) to full model IDs" FontSize="11" Foreground="#A6ADC8" />
                 <TextBlock Text="• Sets define named combinations" FontSize="11" Foreground="#A6ADC8" />
                 <TextBlock Text="• Evict costs control unload priority" FontSize="11" Foreground="#A6ADC8" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- ===================== UPDATES TAB ===================== -->
+      <TabItem Header="Updates">
+        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="16" DataContext="{Binding UpdateViewModel}">
+            <!-- Header -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="6">
+                <TextBlock Text="llama-swap Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
+                <TextBlock Text="Download and install the latest llama-swap release from GitHub." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <!-- Version info -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="6">
+                  <Grid ColumnDefinitions="140,*,140,*" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0" Text="Current" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding CurrentVersion}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                    <TextBlock Grid.Column="2" Text="Latest" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding LatestVersion}" FontSize="14" FontWeight="Bold" Foreground="#89B4FA" />
+                  </Grid>
+                  <TextBlock Text="{Binding UpdateStatusText}" FontSize="12" Foreground="{Binding UpdateStatusColor}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <Button Content="Check"
+                          Command="{Binding CheckCommand}"
+                          Padding="14,7"
+                          IsEnabled="{Binding CheckButtonEnabled}" />
+                  <Button Content="Update"
+                          Command="{Binding UpdateCommand}"
+                          Classes="success"
+                          Padding="14,7"
+                          IsEnabled="{Binding UpdateButtonEnabled}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <!-- Progress -->
+            <Border Padding="16" Background="#313244" CornerRadius="8" IsVisible="{Binding IsUpdating}">
+              <StackPanel Spacing="10">
+                <TextBlock Text="Installation Progress" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="8" />
+                <TextBlock Text="{Binding ProgressText}" FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <!-- Install info -->
+            <Border Padding="16" Background="#11111B" CornerRadius="8" BorderBrush="#313244" BorderThickness="1">
+              <StackPanel Spacing="4">
+                <TextBlock Text="Install Directory" FontSize="12" FontWeight="Bold" Foreground="#A6ADC8" />
+                <TextBlock Text="{Binding InstallDirectory}" FontSize="11" Foreground="#6C7086" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <!-- llama.cpp Update -->
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <StackPanel Spacing="6">
+                <TextBlock Text="llama.cpp Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
+                <TextBlock Text="Download and install the latest llama.cpp release from GitHub. CUDA version is set in Settings." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Border Padding="16" Background="#313244" CornerRadius="8">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="6">
+                  <Grid ColumnDefinitions="140,*,140,*" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0" Text="Current" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding LlamaCppCurrentVersion}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                    <TextBlock Grid.Column="2" Text="Latest" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding LlamaCppLatestVersion}" FontSize="14" FontWeight="Bold" Foreground="#89B4FA" />
+                  </Grid>
+                  <TextBlock Text="{Binding LlamaCppStatusText}" FontSize="12" Foreground="{Binding LlamaCppStatusColor}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <Button Content="Check"
+                          Command="{Binding LlamaCppCheckCommand}"
+                          Padding="14,7"
+                          IsEnabled="{Binding LlamaCppCheckButtonEnabled}" />
+                  <Button Content="Update"
+                          Command="{Binding LlamaCppUpdateCommand}"
+                          Classes="success"
+                          Padding="14,7"
+                          IsEnabled="{Binding LlamaCppUpdateButtonEnabled}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <!-- llama.cpp install info -->
+            <Border Padding="16" Background="#11111B" CornerRadius="8" BorderBrush="#313244" BorderThickness="1">
+              <StackPanel Spacing="4">
+                <TextBlock Text="llama.cpp Directory" FontSize="12" FontWeight="Bold" Foreground="#A6ADC8" />
+                <TextBlock Text="{Binding LlamaCppDirectory}" FontSize="11" Foreground="#6C7086" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
           </StackPanel>

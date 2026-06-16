@@ -40,14 +40,32 @@ dotnet publish LlamaSwapManager.Desktop/LlamaSwapManager.Desktop.csproj \
 |---|---|---|
 | Window opens | ✅ | ✅ |
 | Tray icon | ✅ | ✅ |
-| Window icon (title bar) | ✅ | ✅ |
+| Window icon (title bar) | ✅ (Avalonia default) | ✅ (Avalonia default) |
 | **Dock icon** | ❌ blank | ✅ llama |
 | **Cmd+Tab icon** | ❌ blank | ✅ llama |
 
 ## Icon files
 
-- **`LlamaSwapManager.Desktop/Assets/llama.png`** — source image
+- **`LlamaSwapManager.Desktop/Assets/llama.png`** — source image (1024x1024, RGBA)
 - **`LlamaSwapManager.Desktop/icon.icns`** — macOS native format (generated with `sips` + `iconutil`)
+- **`LlamaSwapManager.Desktop/Assets/llama.ico`** — Windows icon (multi-resolution: 16, 32, 48, 64, 128, 256)
+
+## Windows Icon
+
+On Windows, the `llama.ico` file is used for:
+- **Alt-Tab switcher** icon
+- **Taskbar** icon
+- **Window title bar** icon
+- **Executable (.exe)** embedded icon
+
+The icon is loaded at runtime in `MainWindow.OnLoaded()` from the output directory (`Assets/llama.ico`). It is also set as the `<ApplicationIcon>` in the `.csproj` so the `.exe` itself has the llama icon.
+
+To regenerate the `.ico` from the source PNG:
+
+```bash
+cd ~/projects/LlamaSwapManager
+python3 gen_windows_icon.py
+```
 
 ## Notes
 

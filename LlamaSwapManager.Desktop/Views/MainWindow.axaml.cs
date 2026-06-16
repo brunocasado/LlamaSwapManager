@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -14,6 +16,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using LlamaSwapManager.Desktop;
 using LlamaSwapManager.ViewModels;
 
 namespace LlamaSwapManager.Views;

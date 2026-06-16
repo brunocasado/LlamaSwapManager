@@ -50,6 +50,21 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _globalTtl = "0";
     [ObservableProperty] private bool _sendLoadingState = true;
 
+    // GPU backend selection
+    [ObservableProperty] private string _selectedGpuBackend = "";
+    [ObservableProperty] private string _gpuDetectionStatus = "";
+    [ObservableProperty] private string _gpuDetectionStatusColor = "#888888";
+    private readonly List<string> _gpuBackendOptions = new();
+    public IReadOnlyList<string> GpuBackendOptions => _gpuBackendOptions;
+
+    // CUDA version selection (shown when CUDA backend is selected)
+    [ObservableProperty] private string _cudaVersion = "12.4";
+    [ObservableProperty] private string _cudaVersionStatus = "";
+    [ObservableProperty] private string _cudaVersionStatusColor = "#888888";
+    [ObservableProperty] private bool _isCudaVersionVisible;
+    private readonly List<string> _cudaVersionOptions = new() { "12.4", "13.3" };
+    public IReadOnlyList<string> CudaVersionOptions => _cudaVersionOptions;
+
     // Logs
     [ObservableProperty] private ObservableCollection<string> _logMessages = new();
     [ObservableProperty] private string _logText = "";
@@ -98,6 +113,9 @@ public partial class MainViewModel : ObservableObject
     private LogStreamService? _logStreamService;
     private CancellationTokenSource? _logStreamCts;
     private string? _currentStreamingModelId;
+
+    // Update subsystem
+    public UpdateViewModel UpdateViewModel { get; }
 
     public enum AppView { Models, Matrix, Logs, Metrics }
 
@@ -205,6 +223,20 @@ public partial class MainViewModel : ObservableObject
         if (File.Exists(defaultServerPath))
             LlamaServerPath = defaultServerPath;
 
+         // Initialize update subsystem after paths are resolved
+        // ExecutablePath is the full binary path — extract directory for UpdateViewModel
+        var updateDir = _processManager.ExecutablePath != null
+            ? Path.GetDirectoryName(_processManager.ExecutablePath)!
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
+        var llamaCppDir = _processManager.LlamaCppDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
+        UpdateViewModel = new UpdateViewModel(updateDir, llamaCppDir, message => OnLogMessage(message), CudaVersion);
+
+        // Detect GPU backends
+        DetectGpuBackends();
+
+        // Detect CUDA version
+        DetectCudaVersion();
+
         Status = LlamaSwapStatus.Stopped;
         UpdateUI();
 
@@ -231,6 +263,69 @@ public partial class MainViewModel : ObservableObject
         {
             ConfigFilePath = _processManager.ConfigPath;
             ConfigFileAutoDetected = true;
+        }
+    }
+
+    private void DetectGpuBackends()
+    {
+        try
+        {
+            var backends = GpuDetectionSettings.GetAvailableBackends();
+            _gpuBackendOptions.Clear();
+
+            foreach (var backend in backends)
+            {
+                var displayName = $"{backend.Name} ({backend.Detail})";
+                _gpuBackendOptions.Add(displayName);
+            }
+
+            // Set default to first available (highest priority)
+            if (_gpuBackendOptions.Count > 0)
+            {
+                SelectedGpuBackend = _gpuBackendOptions[0];
+                GpuDetectionStatus = $"Auto-detected: {backends[0].Name}";
+                GpuDetectionStatusColor = "#A6E3A1";
+            }
+            else
+            {
+                _gpuBackendOptions.Add("CPU Only (no GPU detected)");
+                SelectedGpuBackend = _gpuBackendOptions[0];
+                GpuDetectionStatus = "No GPU detected — using CPU";
+                GpuDetectionStatusColor = "#F9E2AF";
+            }
+        }
+        catch (Exception ex)
+        {
+            GpuDetectionStatus = $"Error detecting GPU: {ex.Message}";
+            GpuDetectionStatusColor = "#F38BA8";
+            _gpuBackendOptions.Clear();
+            _gpuBackendOptions.Add("CPU Only (detection failed)");
+            SelectedGpuBackend = _gpuBackendOptions[0];
+        }
+    }
+
+    private void DetectCudaVersion()
+    {
+        // Fixed options — user picks the CUDA version for llama.cpp builds
+        // llama.cpp bundles its own CUDA DLLs, so system detection is irrelevant
+        CudaVersion = "12.4";
+        CudaVersionStatus = "llama.cpp bundles its own CUDA runtime DLLs";
+        CudaVersionStatusColor = "#A6ADC8";
+        UpdateCudaVersionVisibility();
+    }
+
+    private void UpdateCudaVersionVisibility()
+    {
+        IsCudaVersionVisible = SelectedGpuBackend != null && SelectedGpuBackend.Contains("Cuda", StringComparison.OrdinalIgnoreCase);
+        if (!IsCudaVersionVisible)
+        {
+            CudaVersion = "12.4";
+            CudaVersionStatus = "";
+        }
+        else
+        {
+            CudaVersionStatus = "llama.cpp bundles its own CUDA runtime DLLs";
+            CudaVersionStatusColor = "#A6ADC8";
         }
     }
 
@@ -296,6 +391,16 @@ public partial class MainViewModel : ObservableObject
         if (config.GlobalTTL.HasValue) GlobalTtl = config.GlobalTTL.Value.ToString();
         if (config.SendLoadingState.HasValue) SendLoadingState = config.SendLoadingState.Value;
 
+        // Parse auto-update CUDA version preference
+        if (config.AutoUpdate != null && !string.IsNullOrEmpty(config.AutoUpdate.CudaVersion))
+        {
+            var savedVersion = config.AutoUpdate.CudaVersion;
+            if (_cudaVersionOptions.Contains(savedVersion))
+            {
+                CudaVersion = savedVersion;
+            }
+        }
+
         SyncMatrixTextFromCollections();
         RebuildMatrixCombinationsFromSets();
         SyncEvictCostsWithCurrentVars(refreshPreview: false);
@@ -325,6 +430,9 @@ public partial class MainViewModel : ObservableObject
 
     private void OnLogMessage(string message)
     {
+        // Write to file logger (always, even before UI is ready)
+        FileLogger.Instance.Log(message);
+
         if (!Dispatcher.UIThread.CheckAccess())
         {
             Dispatcher.UIThread.Post(() => OnLogMessage(message));
@@ -893,6 +1001,10 @@ public partial class MainViewModel : ObservableObject
         config.GlobalTTL = string.IsNullOrEmpty(GlobalTtl) || GlobalTtl == "0" ? null : int.Parse(GlobalTtl);
         config.SendLoadingState = SendLoadingState;
         config.LogFile ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap", "upstream.log");
+
+        // Auto-update settings — initialize if missing
+        config.AutoUpdate ??= new AutoUpdateConfig();
+        config.AutoUpdate.CudaVersion = string.IsNullOrWhiteSpace(CudaVersion) ? null : CudaVersion;
 
         return config;
     }
@@ -1498,9 +1610,29 @@ public partial class MainViewModel : ObservableObject
         UpdateFilteredLogTexts();
     }
 
-    partial void OnProxyLogFilterTextChanged(string value)
+     partial void OnProxyLogFilterTextChanged(string value)
     {
         UpdateFilteredLogTexts();
+    }
+
+     partial void OnSelectedGpuBackendChanged(string value)
+    {
+        // Map display name back to GpuBackend enum
+        var backends = GpuDetectionSettings.GetAvailableBackends();
+        var newBackend = backends.FirstOrDefault(b => $"{b.Name} ({b.Detail})" == SelectedGpuBackend);
+
+        if (newBackend.Backend != GpuDetectionService.GpuBackend.CpuOnly)
+        {
+            GpuDetectionSettings.PreferredBackend = newBackend.Backend;
+            OnLogMessage($"[ui] GPU backend set to: {newBackend.Name}");
+        }
+        else
+        {
+            GpuDetectionSettings.PreferredBackend = null; // reset to auto-detect
+            OnLogMessage("[ui] GPU backend reset to auto-detect (CPU fallback)");
+        }
+
+        UpdateCudaVersionVisibility();
     }
 
     private async Task PollMetricsAsync(CancellationToken ct)

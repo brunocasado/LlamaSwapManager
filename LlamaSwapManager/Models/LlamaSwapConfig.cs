@@ -62,6 +62,12 @@ public class LlamaSwapConfig
     [YamlMember(Alias = "peers")]
     public Dictionary<string, PeerConfig>? Peers { get; set; }
 
+    [YamlMember(Alias = "autoUpdate")]
+    public AutoUpdateConfig? AutoUpdate { get; set; }
+
+    [YamlMember(Alias = "binaries")]
+    public Dictionary<string, BinaryConfig>? Binaries { get; set; }
+
     public string ToYaml()
     {
         var serializer = new SerializerBuilder()
@@ -213,4 +219,40 @@ public class PeerConfig
 
     [YamlMember(Alias = "apiKey")]
     public string? ApiKey { get; set; }
+}
+
+/// <summary>
+/// Auto-update configuration for llama-swap and llama.cpp binaries.
+/// </summary>
+public class AutoUpdateConfig
+{
+    [YamlMember(Alias = "enabled")]
+    public bool Enabled { get; set; } = true;
+
+    [YamlMember(Alias = "checkOnStartup")]
+    public bool CheckOnStartup { get; set; } = true;
+
+    [YamlMember(Alias = "checkInterval")]
+    public string? CheckInterval { get; set; } = "daily";
+
+    [YamlMember(Alias = "autoDownload")]
+    public bool AutoDownload { get; set; } = false;
+
+    /// <summary>
+    /// Forced CUDA toolkit version for llama.cpp downloads. Null or empty = auto-detect.
+    /// </summary>
+    [YamlMember(Alias = "cudaVersion")]
+    public string? CudaVersion { get; set; }
+}
+
+/// <summary>
+/// Per-binary auto-update settings.
+/// </summary>
+public class BinaryConfig
+{
+    [YamlMember(Alias = "enabled")]
+    public bool Enabled { get; set; } = true;
+
+    [YamlMember(Alias = "version")]
+    public string? Version { get; set; }
 }

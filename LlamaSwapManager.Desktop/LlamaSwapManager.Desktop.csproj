@@ -11,31 +11,81 @@
 
   <!-- macOS: informa o .app bundle qual icone usar no Dock / Cmd+Tab.
         O SDK do .NET gera um Info.plist automaticamente e inclui este campo. -->
-   <PropertyGroup Condition="'$(IsOSX)'=='true'">
-     <CFBundleIconFile>icon.icns</CFBundleIconFile>
-   </PropertyGroup>
+   <PropertyGroup Condition="$([System.OperatingSystem]::IsMacOS())">
+      <CFBundleIconFile>icon</CFBundleIconFile>
+    </PropertyGroup>
 
   <ItemGroup>
-     <PackageReference Include="Avalonia" Version="12.0.4" />
-     <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
-     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
+      <PackageReference Include="Avalonia" Version="12.0.4" />
+      <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
+      <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
+    </ItemGroup>
+
+   <ItemGroup>
+     <ProjectReference Include="..\LlamaSwapManager\LlamaSwapManager.csproj" />
    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\LlamaSwapManager\LlamaSwapManager.csproj" />
-  </ItemGroup>
+   <ItemGroup>
+      <AvaloniaResource Include="Assets/**" Exclude="Assets/icon.icns" />
+      <AvaloniaResource Include="Converters/**" />
+      <AvaloniaResource Include="Themes/**" />
+      <!-- icon.icns is used by the .app bundle on macOS, not by Avalonia runtime -->
+      <Content Include="icon.icns" CopyToOutputDirectory="PreserveNewest" />
+      <!-- llama.ico: AvaloniaResource for XAML Icon property (Windows Alt-Tab, title bar) + Content for runtime fallback -->
+      <AvaloniaResource Include="Assets/llama.ico" />
+      <Content Include="Assets/llama.ico" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
 
-  <ItemGroup>
-    <AvaloniaResource Include="Assets\**" Exclude="Assets\icon.icns" />
-    <AvaloniaResource Include="Converters\**" />
-    <AvaloniaResource Include="Themes\**" />
-    <!-- icon.icns é usado pelo .app bundle do macOS, não pelo runtime Avalonia -->
-     <Content Include="icon.icns" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+    <!-- Copy Avalonia.Native native library from NuGet cache to output (not done automatically by SDK) -->
+    <Target Name="CopyAvaloniaNativeDylib" AfterTargets="ResolvePackageAssets" Condition="$([System.OperatingSystem]::IsMacOS())">
+      <ItemGroup>
+        <AvaloniaNativeDylib Include="$(NuGetPackageRoot)avalonia.native/*/runtimes/osx/native/libAvaloniaNative.dylib" />
+      </ItemGroup>
+      <Copy SourceFiles="@(AvaloniaNativeDylib)" DestinationFolder="$(OutputPath)runtimes/osx/native/" SkipUnchangedFiles="true" />
+    </Target>
 
-  <ItemGroup>
-    <Compile Update="Views\MainWindow.axaml.cs">
-      <DependentUpon>MainWindow.axaml</DependentUpon>
-    </Compile>
-  </ItemGroup>
-</Project>
+   <!-- Windows: ícone do executável e Alt-Tab (applied by C# compiler for net9.0-windows) -->
+   <PropertyGroup>
+     <ApplicationIcon>$(MSBuildProjectDirectory)/Assets/llama.ico</ApplicationIcon>
+   </PropertyGroup>
+
+    <!-- macOS: post-build target to generate .app bundle for Dock / Cmd+Tab icons (only for native macOS builds, not cross-compiled) -->
+         <Target Name="GenerateAppBundle" AfterTargets="Build" Condition="$([System.OperatingSystem]::IsMacOS()) and Exists('$(MSBuildProjectDirectory)/icon.icns') and '$(RuntimeIdentifier)' == ''">
+           <PropertyGroup>
+             <AppBundlePath>$(OutputPath)$(AssemblyName).app</AppBundlePath>
+             <AppBundleMacOS>$(AppBundlePath)/Contents/MacOS</AppBundleMacOS>
+             <AppBundleResources>$(AppBundlePath)/Contents/Resources</AppBundleResources>
+             <AppBundleContents>$(AppBundlePath)/Contents</AppBundleContents>
+           </PropertyGroup>
+
+           <!-- Remove stale directories from previous self-contained publishes -->
+           <Exec Command="rm -rf &quot;$(OutputPath)osx-arm64&quot; &quot;$(OutputPath)publish&quot;" />
+
+           <!-- Create bundle directories -->
+           <MakeDir Directories="$(AppBundleMacOS);$(AppBundleResources);$(AppBundleContents)" />
+
+           <!-- Copy specific files into .app bundle -->
+           <Exec Command="cp &quot;$(OutputPath)$(AssemblyName)&quot; &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp &quot;$(OutputPath)$(AssemblyName).dll&quot; &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp &quot;$(OutputPath)$(AssemblyName).deps.json&quot; &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp &quot;$(OutputPath)$(AssemblyName).runtimeconfig.json&quot; &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp &quot;$(OutputPath)&quot;*.dll &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp -R &quot;$(OutputPath)runtimes&quot; &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp &quot;$(MSBuildProjectDirectory)/run.sh&quot; &quot;$(AppBundleMacOS)/&quot;" />
+           <Exec Command="cp &quot;$(MSBuildProjectDirectory)/icon.icns&quot; &quot;$(AppBundleResources)/icon.icns&quot;" />
+
+           <!-- Generate Info.plist -->
+           <WriteLinesToFile File="$(AppBundleContents)/Info.plist"
+                             Lines="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#x0D;&#x0A;&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;&#x0D;&#x0A;&lt;plist version=&quot;1.0&quot;&gt;&#x0D;&#x0A;&lt;dict&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleName&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;$(AssemblyName)&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleDisplayName&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;$(AssemblyName)&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleIdentifier&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;me.brunocasado.llamaswapmanager&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleVersion&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;1.0.0&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleShortVersionString&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;1.0.0&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundlePackageType&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;APPL&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleExecutable&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;run.sh&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleIconFile&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;icon&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;NSHighResolutionCapable&lt;/key&gt;&#x0D;&#x0A;    &lt;true/&gt;&#x0D;&#x0A;&lt;/dict&gt;&#x0D;&#x0A;&lt;/plist&gt;"
+                             Overwrite="true" />
+
+              <!-- Make run.sh executable -->
+                 <Exec Command="chmod +x &quot;$(AppBundleMacOS)/run.sh&quot;" />
+
+                 <!-- Re-sign dylibs (cp from NuGet cache breaks their code signatures) -->
+                        <Exec Command="find &quot;$(AppBundleMacOS)/runtimes/osx/native&quot; -name '*.dylib' -exec codesign --remove-signature {} +" />
+                        <Exec Command="find &quot;$(AppBundleMacOS)/runtimes/osx/native&quot; -name '*.dylib' -exec codesign --force --sign - {} +" />
+
+                 <Message Importance="high" Text="  [macOS] .app bundle generated: $(AppBundlePath)" />
+               </Target>
+    </Project>

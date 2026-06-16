@@ -274,6 +274,100 @@ public class ConfigService
         ConfigChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Ensure auto-update config has defaults (migration for old configs).
+    /// </summary>
+    public void EnsureAutoUpdateDefaults()
+    {
+        if (_config.AutoUpdate == null)
+        {
+            _config.AutoUpdate = new AutoUpdateConfig();
+            TrackAutoUpdateChange();
+        }
+        else
+        {
+            // Apply defaults for missing fields in old configs
+            if (_config.AutoUpdate.CheckInterval == null)
+            {
+                _config.AutoUpdate.CheckInterval = "daily";
+                TrackAutoUpdateChange();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Set the auto-update enabled flag.
+    /// </summary>
+    public void SetAutoUpdateEnabled(bool enabled)
+    {
+        EnsureAutoUpdateDefaults();
+        _config.AutoUpdate!.Enabled = enabled;
+        TrackAutoUpdateChange();
+        ConfigChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Set the check-on-startup flag.
+    /// </summary>
+    public void SetCheckOnStartup(bool checkOnStartup)
+    {
+        EnsureAutoUpdateDefaults();
+        _config.AutoUpdate!.CheckOnStartup = checkOnStartup;
+        TrackAutoUpdateChange();
+        ConfigChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Set the check interval (daily, weekly, monthly, manual).
+    /// </summary>
+    public void SetCheckInterval(string interval)
+    {
+        EnsureAutoUpdateDefaults();
+        _config.AutoUpdate!.CheckInterval = interval;
+        TrackAutoUpdateChange();
+        ConfigChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Set the auto-download flag.
+    /// </summary>
+    public void SetAutoDownload(bool autoDownload)
+    {
+        EnsureAutoUpdateDefaults();
+        _config.AutoUpdate!.AutoDownload = autoDownload;
+        TrackAutoUpdateChange();
+        ConfigChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Set binary-specific auto-update settings.
+    /// </summary>
+    public void SetBinaryConfig(string binaryName, bool enabled, string? version = null)
+    {
+        _config.Binaries ??= new Dictionary<string, BinaryConfig>();
+        if (!_config.Binaries.TryGetValue(binaryName, out var binaryConfig))
+        {
+            binaryConfig = new BinaryConfig();
+            _config.Binaries[binaryName] = binaryConfig;
+        }
+        binaryConfig.Enabled = enabled;
+        if (version != null)
+        {
+            binaryConfig.Version = version;
+        }
+        TrackBinaryChange(binaryName);
+        ConfigChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Get the current auto-update config, ensuring defaults exist.
+    /// </summary>
+    public AutoUpdateConfig GetAutoUpdateConfig()
+    {
+        EnsureAutoUpdateDefaults();
+        return _config.AutoUpdate!;
+    }
+
     public void ClearMatrix()
     {
         _config.Matrix = null;
@@ -359,6 +453,26 @@ public class ConfigService
             case "globalTTL":
                 _config.GlobalTTL = value as int?;
                 break;
+            case "autoUpdateEnabled":
+                SetAutoUpdateEnabled(value as bool? == true);
+                return;
+            case "autoUpdateCheckOnStartup":
+                SetCheckOnStartup(value as bool? == true);
+                return;
+            case "autoUpdateCheckInterval":
+                if (value is string interval) SetCheckInterval(interval);
+                return;
+            case "autoUpdateAutoDownload":
+                SetAutoDownload(value as bool? == true);
+                return;
+            case "binaries":
+                if (value is Dictionary<string, BinaryConfig> binaries)
+                {
+                    _config.Binaries = binaries;
+                    TrackAllChanges();
+                    ConfigChanged?.Invoke();
+                }
+                return;
             default:
                 return;
         }
@@ -381,6 +495,16 @@ public class ConfigService
     private void TrackMacroChange(string runtimeId)
     {
         _dirtyFields.Add($"macros.{runtimeId}");
+    }
+
+    private void TrackAutoUpdateChange()
+    {
+        _dirtyFields.Add("autoUpdate");
+    }
+
+    private void TrackBinaryChange(string binaryName)
+    {
+        _dirtyFields.Add($"binaries.{binaryName}");
     }
 
     private void TrackAllChanges()
@@ -408,6 +532,17 @@ public class ConfigService
                     var runtimeId = key.Substring(0, key.Length - 5);
                     _dirtyFields.Add($"macros.{runtimeId}");
                 }
+            }
+        }
+        if (_config.AutoUpdate != null)
+        {
+            _dirtyFields.Add("autoUpdate");
+        }
+        if (_config.Binaries != null)
+        {
+            foreach (var key in _config.Binaries.Keys)
+            {
+                _dirtyFields.Add($"binaries.{key}");
             }
         }
     }

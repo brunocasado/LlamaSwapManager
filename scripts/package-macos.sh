@@ -74,11 +74,28 @@ echo "📦 Assembling $APP_BUNDLE..."
 # Copy all published files into Contents/MacOS/
 cp -R "$RAW_DIR"/* "$APP_BUNDLE/Contents/MacOS/"
 
-# ── 3. Copy icon.icns ────────────────────────────────────────────
+# ── 3. Copy Avalonia.Native native library (not included by dotnet publish --self-contained) ──
+AVALONIA_NATIVE_DYLIB=""
+for pkg_dir in $(find "$HOME/.nuget/packages" -maxdepth 1 -name "avalonia.native" -type d 2>/dev/null); do
+    candidate="$pkg_dir/*/runtimes/osx/native/libAvaloniaNative.dylib"
+    if ls $candidate &>/dev/null; then
+        AVALONIA_NATIVE_DYLIB=$(ls -d $candidate 2>/dev/null | head -1)
+        break
+    fi
+done
+
+if [ -n "$AVALONIA_NATIVE_DYLIB" ]; then
+    cp "$AVALONIA_NATIVE_DYLIB" "$APP_BUNDLE/Contents/MacOS/"
+    echo "   ✓ libAvaloniaNative.dylib copied"
+else
+    echo "⚠ Warning: libAvaloniaNative.dylib not found in NuGet cache — app may crash on startup"
+fi
+
+# ── 4. Copy icon.icns ────────────────────────────────────────────
 cp "$ICON_ICNS" "$APP_BUNDLE/Contents/Resources/icon.icns"
 echo "   ✓ icon.icns copied"
 
-# ── 4. Generate Info.plist ───────────────────────────────────────
+# ── 5. Generate Info.plist ───────────────────────────────────────
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -108,17 +125,17 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 EOF
 echo "   ✓ Info.plist generated"
 
-# ── 5. Make the executable executable ────────────────────────────
+# ── 6. Make the executable executable ────────────────────────────
 chmod +x "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE"
 echo "   ✓ +x permission applied"
 
-# ── 6. Remove quarantine attribute (if present) ──────────────────
+# ── 7. Remove quarantine attribute (if present) ──────────────────
 if command -v xattr &>/dev/null; then
   xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
   echo "   ✓ Quarantine removed"
 fi
 
-# ── 7. Validate structure ────────────────────────────────────────
+# ── 8. Validate structure ────────────────────────────────────────
 echo ""
 echo "📋 Final structure:"
 echo "   publish/LlamaSwapManager.app/"
@@ -130,7 +147,7 @@ echo "        └── Resources/"
 echo "             └── icon.icns"
 echo ""
 
-# ── 8. Open the app ──────────────────────────────────────────────
+# ── 9. Open the app ──────────────────────────────────────────────
 echo "🚀 Opening the app..."
 open "$APP_BUNDLE"
 

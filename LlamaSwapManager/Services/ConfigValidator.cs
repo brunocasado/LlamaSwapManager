@@ -34,6 +34,18 @@ public static class ConfigValidator
         "proxy", "upstream", "both", "none"
     };
 
+    // Valid check interval values
+    private static readonly HashSet<string> ValidCheckIntervals = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "daily", "weekly", "monthly", "manual"
+    };
+
+    // Valid binary names
+    private static readonly HashSet<string> ValidBinaryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "llamaSwap", "llamaCpp"
+    };
+
     /// <summary>
     /// Full validation: structural + semantic + dry-run.
     /// Returns (isValid, errors) tuple.
@@ -263,6 +275,40 @@ public static class ConfigValidator
             }
         }
 
+        // Validate auto-update config
+        if (config.AutoUpdate != null)
+        {
+            if (!string.IsNullOrEmpty(config.AutoUpdate.CheckInterval) &&
+                !ValidCheckIntervals.Contains(config.AutoUpdate.CheckInterval))
+            {
+                errors.Add($"Invalid autoUpdate.checkInterval: '{config.AutoUpdate.CheckInterval}'. Valid values: daily, weekly, monthly, manual.");
+            }
+        }
+
+        // Validate binaries config
+        if (config.Binaries != null)
+        {
+            foreach (var kvp in config.Binaries)
+            {
+                var binaryName = kvp.Key;
+                var binaryConfig = kvp.Value;
+
+                if (!ValidBinaryNames.Contains(binaryName))
+                {
+                    errors.Add($"Unknown binary '{binaryName}' in binaries config. Valid binaries: {string.Join(", ", ValidBinaryNames)}");
+                }
+
+                if (binaryConfig != null && !string.IsNullOrEmpty(binaryConfig.Version))
+                {
+                    // Version must not be empty if set
+                    if (binaryConfig.Version.Trim().Length == 0)
+                    {
+                        errors.Add($"Binary '{binaryName}': version cannot be whitespace.");
+                    }
+                }
+            }
+        }
+
         return errors;
     }
 
@@ -362,6 +408,55 @@ public static class ConfigValidator
                     {
                         if (config.Matrix.EvictCosts.Count != reparsed.Matrix.EvictCosts.Count)
                             errors.Add("Dry-run failed: Matrix evict_costs count mismatch.");
+                    }
+                }
+            }
+
+            // Verify auto-update round-trip
+            if (config.AutoUpdate != null)
+            {
+                if (reparsed.AutoUpdate == null)
+                {
+                    errors.Add("Dry-run failed: AutoUpdate config lost after round-trip.");
+                }
+                else
+                {
+                    if (config.AutoUpdate.Enabled != reparsed.AutoUpdate.Enabled)
+                        errors.Add("Dry-run failed: AutoUpdate.Enabled mismatch after round-trip.");
+                    if (config.AutoUpdate.CheckOnStartup != reparsed.AutoUpdate.CheckOnStartup)
+                        errors.Add("Dry-run failed: AutoUpdate.CheckOnStartup mismatch after round-trip.");
+                    if (config.AutoUpdate.CheckInterval != reparsed.AutoUpdate.CheckInterval)
+                        errors.Add("Dry-run failed: AutoUpdate.CheckInterval mismatch after round-trip.");
+                    if (config.AutoUpdate.AutoDownload != reparsed.AutoUpdate.AutoDownload)
+                        errors.Add("Dry-run failed: AutoUpdate.AutoDownload mismatch after round-trip.");
+                }
+            }
+
+            // Verify binaries round-trip
+            if (config.Binaries != null)
+            {
+                if (reparsed.Binaries == null)
+                {
+                    errors.Add("Dry-run failed: Binaries config lost after round-trip.");
+                }
+                else
+                {
+                    if (config.Binaries.Count != reparsed.Binaries.Count)
+                        errors.Add("Dry-run failed: Binaries count mismatch.");
+                    else
+                    {
+                        foreach (var kvp in config.Binaries)
+                        {
+                            if (!reparsed.Binaries.TryGetValue(kvp.Key, out var reparsedBinary))
+                            {
+                                errors.Add($"Dry-run failed: binary '{kvp.Key}' not found after round-trip.");
+                                continue;
+                            }
+                            if (kvp.Value?.Enabled != reparsedBinary?.Enabled)
+                                errors.Add($"Dry-run failed: binary '{kvp.Key}' Enabled mismatch after round-trip.");
+                            if (kvp.Value?.Version != reparsedBinary?.Version)
+                                errors.Add($"Dry-run failed: binary '{kvp.Key}' Version mismatch after round-trip.");
+                        }
                     }
                 }
             }
