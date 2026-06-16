@@ -266,20 +266,40 @@ public class LlamaCppDownloader : IDisposable
                 var cudaVersion = preferredCudaVersion ?? CudaVersionDetector.GetCudaVersion();
                 var llamaCudaAssets = allCudaAssets.Where(a => a.AssetType == CudaAssetType.LlamaBuild).ToList();
 
-                if (llamaCudaAssets.Any() && !string.IsNullOrEmpty(cudaVersion))
+                if (llamaCudaAssets.Any())
                 {
-                    // Version-aware selection for CUDA builds
-                    var bestAsset = FindBestCudaAsset(llamaCudaAssets, cudaVersion);
-                    if (bestAsset != null)
+                    if (!string.IsNullOrEmpty(cudaVersion))
                     {
-                        var source = preferredCudaVersion != null ? $"forced ({preferredCudaVersion})" : "auto-detected";
-                        LogMessage?.Invoke($"[llama.cpp] CUDA version-aware selection ({source}): {bestAsset.Name}");
-                        return new DetectedAsset(
-                            bestAsset.Name,
-                            bestAsset.Size,
-                            bestAsset.Url,
-                            bestAsset.Digest,
-                            cudartAssets);
+                        // Version-aware selection for CUDA builds
+                        var bestAsset = FindBestCudaAsset(llamaCudaAssets, cudaVersion);
+                        if (bestAsset != null)
+                        {
+                            var source = preferredCudaVersion != null ? $"forced ({preferredCudaVersion})" : "auto-detected";
+                            LogMessage?.Invoke($"[llama.cpp] CUDA version-aware selection ({source}): {bestAsset.Name}");
+                            return new DetectedAsset(
+                                bestAsset.Name,
+                                bestAsset.Size,
+                                bestAsset.Url,
+                                bestAsset.Digest,
+                                cudartAssets);
+                        }
+                    }
+
+                    // Fallback: no CUDA version detected — pick latest CUDA build
+                    // User has CUDA selected but toolkit not installed; give them the newest CUDA
+                    if (cudaVersion == null)
+                    {
+                        var latestAsset = llamaCudaAssets.OrderByDescending(a => a.Name).FirstOrDefault();
+                        if (latestAsset != null)
+                        {
+                            LogMessage?.Invoke($"[llama.cpp] No CUDA version detected — selecting latest CUDA build: {latestAsset.Name}");
+                            return new DetectedAsset(
+                                latestAsset.Name,
+                                latestAsset.Size,
+                                latestAsset.Url,
+                                latestAsset.Digest,
+                                cudartAssets);
+                        }
                     }
                 }
             }
@@ -546,9 +566,12 @@ public class LlamaCppDownloader : IDisposable
             }
 
             // Verify key binary exists after install
-            if (!File.Exists(Path.Combine(targetDirectory, "llama-server")))
+            var serverBin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? "llama-server.exe"
+                : "llama-server";
+            if (!File.Exists(Path.Combine(targetDirectory, serverBin)))
             {
-                LogMessage?.Invoke("[llama.cpp] Installed binary 'llama-server' not found — rollback");
+                LogMessage?.Invoke($"[llama.cpp] Installed binary '{serverBin}' not found — rollback");
                 Rollback(backupPath, targetDirectory);
                 return false;
             }
