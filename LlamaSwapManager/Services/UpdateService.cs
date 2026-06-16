@@ -193,13 +193,23 @@ public class UpdateService : IDisposable
 
             ProgressChanged?.Invoke(new UpdateProgress("Checksum verified", 70));
 
-            // Step 6: Extract tar.gz
+            // Step 6: Extract archive (tar.gz for Unix, zip for Windows)
             ProgressChanged?.Invoke(new UpdateProgress("Extracting archive...", 75));
 
             var extractDir = Path.Combine(tempDir, "extracted");
             Directory.CreateDirectory(extractDir);
 
-            if (!ExtractTarGz(archivePath, extractDir))
+            bool extractOk;
+            if (_osName == "windows" && archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                extractOk = ExtractZip(archivePath, extractDir);
+            }
+            else
+            {
+                extractOk = ExtractTarGz(archivePath, extractDir);
+            }
+
+            if (!extractOk)
             {
                 LogMessage?.Invoke("Failed to extract archive");
                 return false;
@@ -514,6 +524,20 @@ public class UpdateService : IDisposable
         }
     }
 
+    private bool ExtractZip(string archivePath, string extractDir)
+    {
+        try
+        {
+            ZipFile.ExtractToDirectory(archivePath, extractDir, overwriteFiles: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"zip extraction error: {ex.Message}");
+            return false;
+        }
+    }
+
     private string? FindCurrentBinary()
     {
         var candidates = new[]
@@ -598,22 +622,37 @@ public class UpdateService : IDisposable
 
     /// <summary>
     /// Strictly match asset name against OS and architecture.
-    /// llama-swap release assets follow: llama-swap_<version>_<os>_<arch>.tar.gz
+    /// llama-swap release assets follow: llama-swap_<version>_<os>_<arch>.tar.gz (Unix) or .zip (Windows)
     /// </summary>
     private bool AssetMatchesPlatform(string assetName)
     {
-        // Must end with .tar.gz
+        // Windows: accept .zip
+        if (_osName == "windows")
+        {
+            if (!assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var osPattern = $"_{_osName}_";
+            if (!assetName.Contains(osPattern))
+                return false;
+
+            var archPattern = $"_{_arch}.zip";
+            if (!assetName.EndsWith(archPattern, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
+        }
+
+        // Unix: accept .tar.gz
         if (!assetName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Must contain the OS name as a distinct component (with underscores around it)
-        var osPattern = $"_{_osName}_";
-        if (!assetName.Contains(osPattern))
+        var unixOsPattern = $"_{_osName}_";
+        if (!assetName.Contains(unixOsPattern))
             return false;
 
-        // Must contain the arch as a distinct component (at end: _arch.tar.gz)
-        var archPattern = $"_{_arch}.tar.gz";
-        if (!assetName.EndsWith(archPattern, StringComparison.OrdinalIgnoreCase))
+        var unixArchPattern = $"_{_arch}.tar.gz";
+        if (!assetName.EndsWith(unixArchPattern, StringComparison.OrdinalIgnoreCase))
             return false;
 
         return true;
