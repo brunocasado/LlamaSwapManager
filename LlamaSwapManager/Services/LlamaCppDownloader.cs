@@ -239,11 +239,13 @@ public class LlamaCppDownloader : IDisposable
 
         if (isMacArm)
         {
-            patterns.Add("-macos-arm64-");
+            // Asset names: llama-b9704-bin-macos-arm64.tar.gz (no trailing dash after arm64)
+            patterns.Add("-macos-arm64");
         }
         else if (isMacIntel)
         {
-            patterns.Add("-macos-x64-");
+            // Asset names: llama-b9704-bin-macos-x64.tar.gz (no trailing dash after x64)
+            patterns.Add("-macos-x64");
         }
         else if (isWindows || isLinux)
         {

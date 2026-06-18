@@ -116,6 +116,14 @@ public class UpdateService : IDisposable
             var release = System.Text.Json.JsonSerializer.Deserialize<JsonRelease>(json);
             if (release == null) return null;
 
+            // Debug: Print all asset names from GitHub
+            if (release.Assets != null)
+            {
+                var assetNames = string.Join(", ", release.Assets.Select(a => a.Name ?? "null"));
+                LogMessage?.Invoke($"[debug] GitHub assets: {assetNames}");
+                LogMessage?.Invoke($"[debug] Looking for: os={_osName}, arch={_arch}");
+            }
+
             // Find the asset for this platform/arch — strict matching
             var asset = release.Assets?
                 .FirstOrDefault(a => !string.IsNullOrEmpty(a.Name) && AssetMatchesPlatform(a.Name));
