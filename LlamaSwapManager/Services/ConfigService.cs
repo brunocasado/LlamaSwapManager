@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using LlamaSwapManager.Models;
 using YamlDotNet.Serialization;
 
@@ -10,6 +12,7 @@ namespace LlamaSwapManager.Services;
 /// <summary>
 /// Service for loading, saving, and tracking changes to llama-swap config.yml files.
 /// Maintains a snapshot of the last-saved config for diff tracking.
+/// M1: API keys are encrypted before writing to disk.
 /// </summary>
 public class ConfigService
 {
@@ -17,6 +20,12 @@ public class ConfigService
     private LlamaSwapConfig _config;
     private string? _lastSaved;
     private readonly HashSet<string> _dirtyFields = new();
+
+    // M1: Simple encryption key for API keys (derived from app-specific entropy)
+    private static readonly byte[] _encryptionKey = Encoding.UTF8.GetBytes("LlamaSwapMgr!@#$%^&*()_+2024sec");
+
+    // M1: Regex pattern for API key fields — uses \x22 for double quote to avoid verbatim string issues
+    private static readonly string ApiKeyPattern = @"^(\s*)(apiKey|api_key|apiKeyValue|token|secret|authToken):\s*(?:\x22|')?([^\x22\x27#\r\n]+)(?:\x22|')?\s*(#.*)?$";
 
     public event Action<LlamaSwapConfig>? ConfigLoaded;
     public event Action? ConfigChanged;
@@ -27,8 +36,8 @@ public class ConfigService
     public ConfigService(string? configPath = null)
     {
         _configPath = configPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".llama-swap", "config.yml");
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "LlamaSwapManager");
         _config = new LlamaSwapConfig();
 
         if (File.Exists(_configPath))
@@ -112,6 +121,8 @@ public class ConfigService
         {
             var targetPath = path ?? _configPath;
             var yaml = _config.ToYaml();
+            // M1: Encrypt API keys before writing
+            yaml = EncryptYamlApiKeys(yaml);
             File.WriteAllText(targetPath, yaml);
             _lastSaved = yaml;
             _dirtyFields.Clear();
@@ -130,6 +141,8 @@ public class ConfigService
         try
         {
             var yaml = File.ReadAllText(_configPath);
+            // M1: Decrypt API keys after loading
+            yaml = DecryptYamlApiKeys(yaml);
             _config = LlamaSwapConfig.FromYaml(yaml);
             _lastSaved = yaml;
             _dirtyFields.Clear();
@@ -178,6 +191,8 @@ public class ConfigService
         try
         {
             var yaml = _config.ToYaml();
+            // M1: Encrypt API keys before writing
+            yaml = EncryptYamlApiKeys(yaml);
             File.WriteAllText(targetPath, yaml);
             _lastSaved = yaml;
             _dirtyFields.Clear();
@@ -194,6 +209,8 @@ public class ConfigService
         try
         {
             var yaml = _config.ToYaml();
+            // M1: Encrypt any plaintext API keys in the YAML before saving
+            yaml = EncryptYamlApiKeys(yaml);
             File.WriteAllText(_configPath, yaml);
             _lastSaved = yaml;
             _dirtyFields.Clear();
@@ -596,5 +613,128 @@ public class ConfigService
                 differences.Add(path);
             }
         }
+    }
+
+    // =====================================================================
+    // M1: API key encryption/decryption
+    // =====================================================================
+
+    /// <summary>
+    /// Encrypts a plaintext string using AES-256-CBC.
+    /// Returns base64-encoded ciphertext.
+    /// </summary>
+    private static string EncryptApiKey(string plaintext)
+    {
+        using var aes = Aes.Create();
+        aes.Key = _encryptionKey.Take(32).ToArray();
+        aes.GenerateIV();
+
+        using var encryptor = aes.CreateEncryptor();
+        var plainBytes = Encoding.UTF8.GetBytes(plaintext);
+        var cipherBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+
+        // Prepend IV to ciphertext
+        var combined = new byte[aes.IV!.Length + cipherBytes.Length];
+        Array.Copy(aes.IV, 0, combined, 0, aes.IV.Length);
+        Array.Copy(cipherBytes, 0, combined, aes.IV.Length, cipherBytes.Length);
+
+        return Convert.ToBase64String(combined);
+    }
+
+    /// <summary>
+    /// Decrypts a base64-encoded AES-256-CBC ciphertext.
+    /// Returns plaintext string, or null if decryption fails.
+    /// </summary>
+    private static string? DecryptApiKey(string ciphertext)
+    {
+        try
+        {
+            using var aes = Aes.Create();
+            aes.Key = _encryptionKey.Take(32).ToArray();
+
+            var combined = Convert.FromBase64String(ciphertext);
+            if (combined.Length < aes.IV!.Length) return null;
+
+            aes.IV = combined.Take(aes.IV.Length).ToArray();
+            var cipherBytes = combined.Skip(aes.IV.Length).ToArray();
+
+            using var decryptor = aes.CreateDecryptor();
+            var plainBytes = decryptor.TransformFinalBlock(cipherBytes, 0, cipherBytes.Length);
+
+            return Encoding.UTF8.GetString(plainBytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Checks if a string looks like an encrypted API key (base64-encoded AES ciphertext).
+    /// </summary>
+    private static bool IsEncrypted(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        // Encrypted values are base64 and typically start with a letter, contain padding
+        return value.Length > 16 && value.All(c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                       (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=');
+    }
+
+    /// <summary>
+    /// M1: Post-process YAML to encrypt API key values.
+    /// Looks for common API key field patterns and encrypts their values.
+    /// </summary>
+    private static string EncryptYamlApiKeys(string yaml)
+    {
+        var lines = yaml.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimEnd();
+            var match = System.Text.RegularExpressions.Regex.Match(line, ApiKeyPattern);
+            if (match.Success)
+            {
+                var value = match.Groups[3].Value.Trim();
+                // Only encrypt if it looks like a real key (not empty, not a path, not encrypted)
+                if (!string.IsNullOrEmpty(value) && value.Length > 3 && !value.Contains('/') && !IsEncrypted(value))
+                {
+                    var encrypted = EncryptApiKey(value);
+                    var prefix = match.Groups[1].Value;
+                    var keyName = match.Groups[2].Value;
+                    var comment = match.Groups[4].Value;
+                    lines[i] = $"{prefix}{keyName}: \"{encrypted}\"{comment}";
+                }
+            }
+        }
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// M1: Post-process YAML to decrypt API key values.
+    /// Looks for common API key field patterns and decrypts encrypted values.
+    /// </summary>
+    private static string DecryptYamlApiKeys(string yaml)
+    {
+        var lines = yaml.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimEnd();
+            var match = System.Text.RegularExpressions.Regex.Match(line, ApiKeyPattern);
+            if (match.Success)
+            {
+                var value = match.Groups[3].Value.Trim().Trim('"', '\'');
+                if (IsEncrypted(value))
+                {
+                    var decrypted = DecryptApiKey(value);
+                    if (decrypted != null)
+                    {
+                        var prefix = match.Groups[1].Value;
+                        var keyName = match.Groups[2].Value;
+                        var comment = match.Groups[4].Value;
+                        lines[i] = $"{prefix}{keyName}: \"{decrypted}\"{comment}";
+                    }
+                }
+            }
+        }
+        return string.Join('\n', lines);
     }
 }

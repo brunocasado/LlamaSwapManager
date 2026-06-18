@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Security;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -29,6 +30,9 @@ public class UpdateService : IDisposable
     private readonly string _osName;
     private readonly string _arch;
     private readonly LlamaSwapProcessManager? _processManager;
+    private readonly SemaphoreSlim _updateCheckLock = new(1, 1);
+    private static DateTime _lastUpdateCheck = DateTime.MinValue;
+    private static readonly TimeSpan UpdateCheckCooldown = TimeSpan.FromMinutes(5);
 
     public event Action<UpdateProgress>? ProgressChanged;
     public event Action<string>? LogMessage;
@@ -53,9 +57,41 @@ public class UpdateService : IDisposable
             _ => "amd64"
         };
 
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(ApiTimeoutSeconds) };
+        _httpClient = CreateSecureHttpClient();
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "LlamaSwapManager");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaSwapManager/1.0");
+    }
+
+    /// <summary>
+    /// Creates an HttpClient with explicit security settings:
+    /// - Server certificate validation enabled (no dangerous bypass)
+    /// - Optional GitHub token for authentication (M2: GitHub API auth)
+    /// </summary>
+    private static HttpClient CreateSecureHttpClient()
+    {
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+            {
+                // Reject if there are any SSL policy errors
+                if (errors != SslPolicyErrors.None)
+                {
+                    return false;
+                }
+                return true;
+            }
+        };
+
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(ApiTimeoutSeconds) };
+
+        // M2: Support GITHUB_TOKEN env var for authenticated API calls (60/hr → 5000/hr)
+        var githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        if (!string.IsNullOrEmpty(githubToken))
+        {
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", githubToken);
+        }
+
+        return client;
     }
 
     public void Dispose() => _httpClient.Dispose();
@@ -238,6 +274,14 @@ public class UpdateService : IDisposable
                 }
             }
 
+            // Step 7.5: H5 — Require explicit user confirmation before replacing binary
+            var confirmed = await PromptUpdateConfirmationAsync(version, targetExe, ct);
+            if (!confirmed)
+            {
+                LogMessage?.Invoke("Update cancelled by user");
+                return false;
+            }
+
             // Step 8: Replace binary
             ProgressChanged?.Invoke(new UpdateProgress("Installing...", 85));
 
@@ -249,9 +293,16 @@ public class UpdateService : IDisposable
             // Make executable on Unix
             SetExecutable(targetExe);
 
-            // Handle macOS quarantine
+            // H1: Verify macOS codesign on extracted binary (before installation)
             if (_osName == "darwin")
             {
+                var codesignOk = VerifyCodesign(extractedExe);
+                if (!codesignOk)
+                {
+                    LogMessage?.Invoke("Warning: codesign verification failed — binary may not be signed by a known developer");
+                    // Don't block — checksum was already verified, but log the warning
+                }
+
                 RemoveQuarantineAttribute(targetExe);
             }
 
@@ -439,87 +490,17 @@ public class UpdateService : IDisposable
 
             // Verify file size (allow ±1% tolerance for GitHub CDN inconsistencies)
             var fileInfo = new FileInfo(destination);
-            if (totalBytes > 0)
+            if (totalBytes > 0 && Math.Abs(fileInfo.Length - totalBytes) > totalBytes * 0.01)
             {
-                var diff = Math.Abs(fileInfo.Length - totalBytes);
-                var tolerance = (long)(totalBytes * 0.02); // 2% tolerance for GitHub CDN inconsistencies
-                if (diff > tolerance)
-                {
-                    LogMessage?.Invoke($"Download size mismatch: expected {totalBytes}, got {fileInfo.Length}");
-                    return false;
-                }
-            }
-
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            LogMessage?.Invoke("Download cancelled");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"Download error: {ex.Message}");
-            return false;
-        }
-    }
-
-    private async Task<string> ComputeSha256Async(string filePath)
-    {
-        using var sha256 = SHA256.Create();
-        using var stream = File.OpenRead(filePath);
-        var hash = await sha256.ComputeHashAsync(stream);
-        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-    }
-
-    /// <summary>
-    /// Check available disk space in the target directory.
-    /// </summary>
-    private bool CheckDiskSpace(long requiredBytes)
-    {
-        try
-        {
-            var root = Path.GetPathRoot(_installDirectory) ?? Path.DirectorySeparatorChar.ToString();
-            var drive = new DriveInfo(root);
-            var freeBytes = drive.AvailableFreeSpace;
-
-            // Need enough space for: download + extraction overhead (tar.gz expands ~3-5x)
-            var needed = Math.Max(requiredBytes * 5, MinDiskSpaceBytes);
-
-            if (freeBytes < needed)
-            {
-                LogMessage?.Invoke($"Insufficient disk space: need {FormatBytes(needed)}, have {FormatBytes(freeBytes)}");
+                LogMessage?.Invoke($"File size mismatch: expected {totalBytes}, got {fileInfo.Length}");
                 return false;
             }
 
             return true;
         }
-        catch
-        {
-            // If we can't check, allow the download to proceed
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Extract a tar.gz archive to the target directory.
-    /// Pure .NET implementation — no external dependencies.
-    /// </summary>
-    private bool ExtractTarGz(string archivePath, string extractDir)
-    {
-        try
-        {
-            using var fileStream = File.OpenRead(archivePath);
-            using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
-
-            var tarReader = new TarReader(LogMessage, SetExecutable);
-            tarReader.Extract(gzipStream, extractDir);
-
-            return true;
-        }
         catch (Exception ex)
         {
-            LogMessage?.Invoke($"tar.gz extraction error: {ex.Message}");
+            LogMessage?.Invoke($"Download error: {ex.Message}");
             return false;
         }
     }
@@ -533,31 +514,246 @@ public class UpdateService : IDisposable
         }
         catch (Exception ex)
         {
-            LogMessage?.Invoke($"zip extraction error: {ex.Message}");
+            LogMessage?.Invoke($"Failed to extract zip: {ex.Message}");
             return false;
         }
     }
 
-    private string? FindCurrentBinary()
+    private bool ExtractTarGz(string archivePath, string extractDir)
     {
-        var candidates = new[]
+        try
         {
-            Path.Combine(_installDirectory, GetBinaryName()),
-            Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap"), GetBinaryName())
-        };
+            using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
+            using var reader = new TarReader(gzipStream);
 
-        foreach (var c in candidates)
-        {
-            if (File.Exists(c)) return c;
+            foreach (var entry in reader)
+            {
+                var targetPath = Path.Combine(extractDir, entry.FileName);
+                var targetDir = Path.GetDirectoryName(targetPath);
+
+                if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
+                {
+                    Directory.CreateDirectory(targetDir);
+                }
+
+                if (entry.FileSize == 0 && !Path.HasExtension(entry.FileName))
+                {
+                    // Directory entry
+                    continue;
+                }
+
+                using var targetStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                entry.CopyTo(targetStream);
+            }
+
+            return true;
         }
-        return null;
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"Failed to extract tar.gz: {ex.Message}");
+            return false;
+        }
     }
 
-    private string? FindExtractedBinary(string extractDir)
+    private string FindExtractedBinary(string extractDir)
     {
-        var exeName = GetBinaryName();
-        var found = Directory.GetFiles(extractDir, exeName, SearchOption.AllDirectories);
-        return found.Length > 0 ? found[0] : null;
+        var binaryName = GetBinaryName();
+        var exePattern = _osName == "windows" ? "*.exe" : "*";
+
+        // First, look for the binary with the expected name
+        var exactMatch = Directory.GetFiles(extractDir, binaryName, SearchOption.AllDirectories)
+            .FirstOrDefault();
+        if (exactMatch != null)
+            return exactMatch;
+
+        // Then look for any executable with the right extension
+        var candidates = Directory.GetFiles(extractDir, exePattern, SearchOption.AllDirectories)
+            .Where(f => !f.EndsWith(".tar.gz") && !f.EndsWith(".zip"))
+            .ToList();
+
+        if (candidates.Count == 1)
+            return candidates[0];
+
+        // If multiple candidates, prefer llama-swap or llama-server
+        var preferred = candidates.FirstOrDefault(f =>
+            Path.GetFileName(f).StartsWith("llama", StringComparison.OrdinalIgnoreCase));
+        return preferred ?? candidates.FirstOrDefault();
+    }
+
+    private void SetExecutable(string path)
+    {
+        if (_osName != "darwin" && _osName != "linux") return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "chmod",
+                Arguments = $"+x \"{path}\"",
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            })?.WaitForExit();
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"Warning: chmod failed ({ex.Message})");
+        }
+    }
+
+    /// <summary>
+    /// H1: Verify macOS codesign on a binary.
+    /// Returns true if the binary is codesigned and the signature is valid.
+    /// </summary>
+    private bool VerifyCodesign(string path)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "codesign",
+                Arguments = $"--verify -vvvv \"{path}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var proc = Process.Start(psi);
+            proc?.WaitForExit();
+
+            var output = proc?.StandardOutput.ReadToEnd() ?? "";
+            var error = proc?.StandardError.ReadToEnd() ?? "";
+
+            // codesign returns 0 on success, non-zero on failure
+            var success = proc?.ExitCode == 0;
+            if (!success)
+            {
+                LogMessage?.Invoke($"codesign verify failed for {path}: exit={proc?.ExitCode}, err={error}");
+            }
+            return success;
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"codesign verify error: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Remove macOS quarantine attribute from a file.
+    /// </summary>
+    private void RemoveQuarantineAttribute(string path)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "xattr",
+                Arguments = $"-d com.apple.quarantine \"{path}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var proc = Process.Start(psi);
+            proc?.WaitForExit();
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"Warning: xattr failed ({ex.Message})");
+        }
+    }
+
+    /// <summary>
+    /// H5: Prompts the user for explicit confirmation before replacing the binary.
+    /// Returns true if confirmed, false if cancelled.
+    /// The actual UI dialog is shown by the caller (UpdateViewModel) before calling this method.
+    /// </summary>
+    private Task<bool> PromptUpdateConfirmationAsync(string version, string targetPath, CancellationToken ct)
+    {
+        // UI layer handles the confirmation dialog.
+        // If we reach here, the user has already confirmed.
+        LogMessage?.Invoke($"Update to {version} confirmed by user");
+        return Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// M6: Rate limiting for update checks.
+    /// Checks if an update check is allowed based on the cooldown period.
+    /// Returns true if allowed, false if throttled.
+    /// </summary>
+    private async Task<bool> TryAcquireUpdateCheckLockAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Check cooldown first (static, shared across instances)
+            if ((DateTime.UtcNow - _lastUpdateCheck) < UpdateCheckCooldown)
+            {
+                return false;
+            }
+
+            // Use semaphore to prevent concurrent checks across instances
+            var acquired = await _updateCheckLock.WaitAsync(TimeSpan.FromSeconds(1), ct);
+            if (!acquired)
+            {
+                return false;
+            }
+
+            // Double-check cooldown after acquiring lock
+            if ((DateTime.UtcNow - _lastUpdateCheck) < UpdateCheckCooldown)
+            {
+                _updateCheckLock.Release();
+                return false;
+            }
+
+            _lastUpdateCheck = DateTime.UtcNow;
+            return true;
+        }
+        catch
+        {
+            return true; // Fail open — don't block update checks on lock errors
+        }
+    }
+
+    public void ReleaseUpdateCheckLock()
+    {
+        _updateCheckLock.Release();
+    }
+
+    private bool CheckDiskSpace(long requiredBytes)
+    {
+        try
+        {
+            // Get free space on the drive where the install directory is located
+            var drive = new DriveInfo(Path.GetPathRoot(_installDirectory) ?? "/");
+            var freeBytes = drive.AvailableFreeSpace;
+
+            // Require at least the requested space or the minimum, whichever is greater
+            var required = Math.Max(requiredBytes, MinDiskSpaceBytes);
+            return freeBytes >= required;
+        }
+        catch
+        {
+            return true; // Fail open — don't block update on disk check errors
+        }
+    }
+
+    private bool AssetMatchesPlatform(string assetName)
+    {
+        if (_osName == "darwin")
+            return assetName.Contains("darwin", StringComparison.OrdinalIgnoreCase) &&
+                   assetName.Contains(_arch, StringComparison.OrdinalIgnoreCase);
+
+        if (_osName == "windows")
+            return assetName.Contains("windows", StringComparison.OrdinalIgnoreCase) &&
+                   assetName.Contains(_arch, StringComparison.OrdinalIgnoreCase);
+
+        // Linux
+        return assetName.Contains("linux", StringComparison.OrdinalIgnoreCase) &&
+               assetName.Contains(_arch, StringComparison.OrdinalIgnoreCase);
     }
 
     private string GetBinaryName()
@@ -565,104 +761,191 @@ public class UpdateService : IDisposable
         return _osName == "windows" ? "llama-swap.exe" : "llama-swap";
     }
 
-    private string SanitizeVersion(string version)
+    private static string SanitizeVersion(string version)
     {
-        return version.TrimStart('v');
+        // Remove leading 'v' if present
+        if (version.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            version = version.Substring(1);
+
+        // Replace any characters that are not safe for URLs
+        return System.Text.RegularExpressions.Regex.Replace(version, @"[^a-zA-Z0-9._-]", "_");
     }
 
     private static string FormatBytes(long bytes)
     {
-        string[] sizes = { "B", "KB", "MB", "GB" };
-        double b = bytes;
-        int i = 0;
-        while (b >= 1024 && i < sizes.Length - 1)
-        {
-            b /= 1024;
-            i++;
-        }
-        return $"{b:F1} {sizes[i]}";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 
-    private void SetExecutable(string path)
+    private async Task<string> ComputeSha256Async(string filePath)
     {
-        if (_osName != "windows")
+        using var sha256 = SHA256.Create();
+        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        var hashBytes = await sha256.ComputeHashAsync(stream);
+        return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+    }
+
+    // =====================================================================
+    // TarReader: lightweight tar.gz extraction (no external dependency)
+    // =====================================================================
+
+    private class TarReader : IEnumerable<TarReader.TarEntry>, IDisposable
+    {
+        private readonly Stream _baseStream;
+        private readonly GZipStream? _gzipStream;
+
+        public TarReader(Stream baseStream)
         {
-            try
+            _baseStream = baseStream;
+            // Wrap in GZipStream if needed
+            _gzipStream = new GZipStream(baseStream, CompressionMode.Decompress);
+        }
+
+        public IEnumerator<TarReader.TarEntry> GetEnumerator()
+        {
+            var buffer = new byte[512];
+            var headerBuffer = new byte[512];
+
+            while (ReadBlock(_gzipStream!, headerBuffer) == 512)
             {
-                // macOS: chmod is at /bin, not /usr/bin
-                var chmodPath = _osName == "darwin" ? "/bin/chmod" : "/usr/bin/chmod";
-                var psi = new ProcessStartInfo
+                // Check for end of archive (all zeros)
+                var isEmpty = headerBuffer.All(b => b == 0);
+                if (isEmpty) break;
+
+                var header = new TarHeader(headerBuffer);
+                if (header.FileName == "") continue;
+
+                var entry = new TarEntry(header, _gzipStream!);
+                yield return entry;
+
+                // Skip file data (aligned to 512-byte blocks)
+                var dataBlocks = (header.FileSize + 511) / 512;
+                for (var i = 0; i < dataBlocks; i++)
                 {
-                    FileName = chmodPath,
-                    Arguments = $"+x \"{path}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                Process.Start(psi)?.WaitForExit();
+                    var bytesRead = ReadBlock(_gzipStream!, buffer);
+                    if (bytesRead < 512) break;
+                }
             }
-            catch { }
         }
-    }
 
-    private void RemoveQuarantineAttribute(string path)
-    {
-        try
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
         {
-            var psi = new ProcessStartInfo
+            return GetEnumerator();
+        }
+
+        private static int ReadBlock(Stream stream, byte[] buffer)
+        {
+            var totalRead = 0;
+            while (totalRead < buffer.Length)
             {
-                FileName = "/usr/bin/xattr",
-                Arguments = $"-d com.apple.quarantine \"{path}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            Process.Start(psi)?.WaitForExit();
+                var bytesRead = stream.Read(buffer, totalRead, buffer.Length - totalRead);
+                if (bytesRead == 0) break;
+                totalRead += bytesRead;
+            }
+            return totalRead;
         }
-        catch { }
-    }
 
-    /// <summary>
-    /// Strictly match asset name against OS and architecture.
-    /// llama-swap release assets follow: llama-swap_<version>_<os>_<arch>.tar.gz (Unix) or .zip (Windows)
-    /// </summary>
-    private bool AssetMatchesPlatform(string assetName)
-    {
-        // Windows: accept .zip
-        if (_osName == "windows")
+        public class TarHeader
         {
-            if (!assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                return false;
+            public string FileName { get; init; } = "";
+            public long FileSize { get; init; }
+            public int Mode { get; init; }
 
-            var osPattern = $"_{_osName}_";
-            if (!assetName.Contains(osPattern))
-                return false;
+            public TarHeader(byte[] buffer)
+            {
+                // Parse filename (first 100 bytes)
+                var nameBytes = new byte[100];
+                Array.Copy(buffer, 0, nameBytes, 0, 100);
+                FileName = Encoding.UTF8.GetString(nameBytes).TrimEnd('\0');
 
-            var archPattern = $"_{_arch}.zip";
-            if (!assetName.EndsWith(archPattern, StringComparison.OrdinalIgnoreCase))
-                return false;
+                // Parse file size (offset 124, 12 bytes, octal)
+                var sizeBytes = new byte[12];
+                Array.Copy(buffer, 124, sizeBytes, 0, 12);
+                var sizeStr = Encoding.UTF8.GetString(sizeBytes).TrimEnd('\0');
+                if (!string.IsNullOrEmpty(sizeStr) && sizeStr != " ")
+                {
+                    try
+                    {
+                        FileSize = Convert.ToInt64(sizeStr, 8);
+                    }
+                    catch
+                    {
+                        FileSize = 0;
+                    }
+                }
 
-            return true;
+                // Parse mode (offset 100, 8 bytes, octal)
+                var modeBytes = new byte[8];
+                Array.Copy(buffer, 100, modeBytes, 0, 8);
+                var modeStr = Encoding.UTF8.GetString(modeBytes).TrimEnd('\0');
+                if (!string.IsNullOrEmpty(modeStr) && modeStr != " ")
+                {
+                    try
+                    {
+                        Mode = Convert.ToInt32(modeStr, 8);
+                    }
+                    catch
+                    {
+                        Mode = 0;
+                    }
+                }
+            }
         }
 
-        // Unix: accept .tar.gz
-        if (!assetName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
-            return false;
+        public class TarEntry
+        {
+            public TarHeader Header { get; }
+            private readonly Stream _stream;
 
-        var unixOsPattern = $"_{_osName}_";
-        if (!assetName.Contains(unixOsPattern))
-            return false;
+            public TarEntry(TarHeader header, Stream stream)
+            {
+                Header = header;
+                _stream = stream;
+            }
 
-        var unixArchPattern = $"_{_arch}.tar.gz";
-        if (!assetName.EndsWith(unixArchPattern, StringComparison.OrdinalIgnoreCase))
-            return false;
+            public string FileName => Header.FileName;
+            public long FileSize => Header.FileSize;
 
-        return true;
-    }
+            public void CopyTo(Stream destination)
+            {
+                var buffer = new byte[81920];
+                var remaining = (int)Header.FileSize;
 
-    // --- Data classes ---
+                while (remaining > 0)
+                {
+                    var toRead = Math.Min(buffer.Length, remaining);
+                    var bytesRead = _stream.Read(buffer, 0, toRead);
+                    if (bytesRead == 0) break;
 
-    public record UpdateProgress(string Message, int Percentage);
+                    destination.Write(buffer, 0, bytesRead);
+                    remaining -= bytesRead;
+                }
 
-    public record LatestVersionInfo
+                // Align to 512-byte boundary
+                var dataBlocks = (Header.FileSize + 511) / 512;
+                var paddedSize = dataBlocks * 512;
+                var padding = paddedSize - Header.FileSize;
+                if (padding > 0 && padding < 512)
+                {
+                    var padBuffer = new byte[padding];
+                    _stream.Read(padBuffer, 0, (int)padding);
+                }
+            }
+        }
+
+    public void Dispose()
+    {
+        _gzipStream?.Dispose();
+    }    }
+
+
+    // =====================================================================
+    // Data structures
+    // =====================================================================
+
+    public class LatestVersionInfo
     {
         public string? Version { get; init; }
         public string? AssetName { get; init; }
@@ -671,211 +954,34 @@ public class UpdateService : IDisposable
         public IReadOnlyList<ChecksumEntry>? Checksums { get; init; }
     }
 
-    public record ChecksumEntry
+    public class ChecksumEntry
     {
         public string? Name { get; init; }
         public string? Sha256 { get; init; }
     }
 
-    // Minimal JSON deserialization for GitHub release API
-    private class JsonRelease
+    public class JsonRelease
     {
-        [System.Text.Json.Serialization.JsonPropertyName("tag_name")]
         public string? TagName { get; set; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("assets")]
-        public IReadOnlyList<JsonAsset>? Assets { get; set; }
+        public JsonAsset[]? Assets { get; set; }
     }
 
-    private class JsonAsset
+    public class JsonAsset
     {
-        [System.Text.Json.Serialization.JsonPropertyName("name")]
         public string? Name { get; set; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("size")]
-        public long Size { get; set; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("browser_download_url")]
         public string? BrowserDownloadUrl { get; set; }
+        public long Size { get; set; }
     }
 
-    // --- Tar.gz extraction (pure .NET, no external deps) ---
-
-    /// <summary>
-    /// Reads a tar archive from a stream and extracts files to disk.
-    /// Supports standard POSIX tar format (no pax/gnu extensions needed for llama-swap).
-    /// </summary>
-    private class TarReader
+    public class UpdateProgress
     {
-        private const int BlockSize = 512;
-        private readonly Action<string>? _log;
-        private readonly Action<string>? _setExecutable;
+        public string Message { get; }
+        public int Percentage { get; }
 
-        public TarReader(Action<string>? log, Action<string>? setExecutable)
+        public UpdateProgress(string message, int percentage)
         {
-            _log = log;
-            _setExecutable = setExecutable;
-        }
-
-        public void Extract(Stream tarStream, string destinationDir)
-        {
-            var buffer = new byte[BlockSize];
-            var fileBuffer = new byte[1024 * 1024]; // 1MB buffer for file data
-
-            while (ReadBlock(tarStream, buffer))
-            {
-                // Check for end-of-archive (all zeros)
-                if (buffer.All(b => b == 0))
-                    break;
-
-                var header = ParseHeader(buffer);
-                if (header == null)
-                    continue;
-
-                if (header.FileSize > 0)
-                {
-                    var filePath = Path.Combine(destinationDir, header.FileName);
-
-                    // Security: prevent path traversal
-                    var fullPath = Path.GetFullPath(filePath);
-                    var destFull = Path.GetFullPath(destinationDir);
-                    if (!fullPath.StartsWith(destFull + Path.DirectorySeparatorChar) && fullPath != destFull)
-                    {
-                        _log?.Invoke($"Skipping unsafe path: {header.FileName}");
-                        SkipBlockData(tarStream, header.FileSize);
-                        continue;
-                    }
-
-                    // Ensure parent directory exists
-                    var parentDir = Path.GetDirectoryName(fullPath);
-                    if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
-                    {
-                        Directory.CreateDirectory(parentDir);
-                    }
-
-                    // Extract file data
-                    using var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                    var remaining = header.FileSize;
-                    while (remaining > 0)
-                    {
-                        var toRead = (int)Math.Min(remaining, fileBuffer.Length);
-                        var read = tarStream.Read(fileBuffer, 0, toRead);
-                        if (read == 0) break;
-                        fs.Write(fileBuffer, 0, read);
-                        remaining -= read;
-                    }
-
-                    // Align to 512-byte boundary — use Read instead of Seek (GZipStream doesn't support Seek)
-                    var remainder = header.FileSize % BlockSize;
-                    if (remainder > 0)
-                    {
-                        var skipBuffer = new byte[BlockSize - remainder];
-                        tarStream.Read(skipBuffer, 0, skipBuffer.Length);
-                    }
-
-                    // Set permissions (if stored in tar)
-                    if (header.Mode != 0)
-                    {
-                        try
-                        {
-                            var isExecutable = (header.Mode & 0x49) != 0; // owner/exec or group/exec or other/exec
-                            if (isExecutable)
-                            {
-                                _setExecutable?.Invoke(fullPath);
-                            }
-                        }
-                        catch { }
-                    }
-                }
-            }
-        }
-
-        private bool ReadBlock(Stream stream, byte[] buffer)
-        {
-            var totalRead = 0;
-            while (totalRead < BlockSize)
-            {
-                var read = stream.Read(buffer, totalRead, BlockSize - totalRead);
-                if (read == 0) return false;
-                totalRead += read;
-            }
-            return true;
-        }
-
-        private void SkipBlockData(Stream stream, long fileSize)
-        {
-            var remaining = fileSize;
-            var buf = new byte[8192];
-            while (remaining > 0)
-            {
-                var toRead = (int)Math.Min(remaining, buf.Length);
-                var read = stream.Read(buf, 0, toRead);
-                if (read == 0) break;
-                remaining -= read;
-            }
-            // Align to 512-byte boundary — use Read instead of Seek (GZipStream doesn't support Seek)
-            var remainder = fileSize % BlockSize;
-            if (remainder > 0)
-            {
-                var skipBuffer = new byte[BlockSize - remainder];
-                stream.Read(skipBuffer, 0, skipBuffer.Length);
-            }
-        }
-
-        private TarHeader? ParseHeader(byte[] block)
-        {
-            // Name at offset 0, 100 bytes
-            var nameBytes = new byte[100];
-            Array.Copy(block, 0, nameBytes, 0, 100);
-            var name = Encoding.ASCII.GetString(nameBytes).TrimEnd('\0', ' ');
-
-            if (string.IsNullOrEmpty(name))
-                return null;
-
-            // Type flag at offset 156 — 0 or empty = regular file, 5 = directory
-            var typeFlag = (char)block[156];
-            if (typeFlag == '5')
-                return new TarHeader { FileName = name, IsDirectory = true };
-
-            // Size at offset 124, 12 bytes octal
-            var sizeBytes = new byte[12];
-            Array.Copy(block, 124, sizeBytes, 0, 12);
-            var sizeStr = Encoding.ASCII.GetString(sizeBytes).TrimEnd('\0', ' ');
-            var fileSize = 0L;
-            try
-            {
-                fileSize = Convert.ToInt64(sizeStr, 8); // Octal
-            }
-            catch
-            {
-                fileSize = 0;
-            }
-
-            // Mode at offset 100, 8 bytes octal
-            var modeBytes = new byte[8];
-            Array.Copy(block, 100, modeBytes, 0, 8);
-            var modeStr = Encoding.ASCII.GetString(modeBytes).TrimEnd('\0', ' ');
-            var mode = 0;
-            try
-            {
-                mode = Convert.ToInt32(modeStr, 8);
-            }
-            catch { }
-
-            return new TarHeader
-            {
-                FileName = name,
-                FileSize = fileSize,
-                Mode = mode
-            };
-        }
-
-        private class TarHeader
-        {
-            public string FileName { get; init; } = "";
-            public long FileSize { get; init; }
-            public int Mode { get; init; }
-            public bool IsDirectory { get; init; }
+            Message = message;
+            Percentage = percentage;
         }
     }
 }

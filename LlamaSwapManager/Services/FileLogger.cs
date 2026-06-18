@@ -121,7 +121,30 @@ public class FileLogger
         var baseDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "LlamaSwapManager");
-        return Path.Combine(baseDir, LogDirName);
+        var logDir = Path.Combine(baseDir, LogDirName);
+
+        // M3: Set restrictive permissions on log directory (owner-only access on Unix)
+        if (!System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "chmod",
+                    Arguments = $"700 \"{logDir}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                proc?.WaitForExit(2000);
+            }
+            catch
+            {
+                // Non-fatal — logs will still work, just with default permissions
+            }
+        }
+
+        return logDir;
     }
 
     private void CleanupOldLogs()

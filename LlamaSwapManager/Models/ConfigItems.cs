@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -38,16 +39,55 @@ public partial class ModelItem : ObservableObject
         LlamaServerPath = llamaServerPath;
     }
 
+    // =====================================================================
+    // M7: Input validation helpers
+    // =====================================================================
+
+    /// <summary>
+    /// Validates a path segment: only alphanumeric, dots, hyphens, underscores, slashes allowed.
+    /// </summary>
+    private static bool IsValidPathSegment(string segment)
+    {
+        if (string.IsNullOrEmpty(segment)) return true; // Empty is OK (will use default)
+        return System.Text.RegularExpressions.Regex.IsMatch(segment, @"^[a-zA-Z0-9._/\\\-]+$");
+    }
+
+    /// <summary>
+    /// Validates a Hugging Face model ID: org/name format with optional quantization suffix.
+    /// Only alphanumeric, slashes, dots, hyphens, underscores allowed.
+    /// </summary>
+    private static bool IsValidHfModelId(string modelId)
+    {
+        if (string.IsNullOrEmpty(modelId)) return true;
+        // Reject any shell metacharacters or injection attempts
+        return System.Text.RegularExpressions.Regex.IsMatch(modelId, @"^[a-zA-Z0-9._/\-]+$");
+    }
+
     /// <summary>
     /// Generate the cmd string for llama-swap config.
+    /// M7: Validates model ID and HfModel to prevent command injection.
     /// </summary>
     public string GenerateCmd()
     {
         var path = LlamaServerPath ?? "llama-server";
+
+        // M7: Validate path — only allow alphanumeric, dots, slashes, hyphens, underscores
+        if (!IsValidPathSegment(path))
+        {
+            throw new ArgumentException("Invalid llama-server path: contains unauthorized characters");
+        }
+
         var parts = new System.Collections.Generic.List<string> { path };
 
         if (!string.IsNullOrEmpty(HfModel))
+        {
+            // M7: Validate HfModel — only allow alphanumeric, slashes, dots, hyphens, underscores (Hugging Face repo format)
+            if (!IsValidHfModelId(HfModel))
+            {
+                throw new ArgumentException($"Invalid HfModel ID: '{HfModel}' contains unauthorized characters");
+            }
             parts.Add($"--hf {HfModel}");
+        }
 
         if (UseJinja)
             parts.Add("--jinja");

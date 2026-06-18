@@ -54,6 +54,11 @@ public class LlamaSwapProcessManager : IDisposable
         return _llamaCppDownloader;
     }
 
+    /// <summary>
+    /// Tracks PIDs we own so we only kill our own processes (H3 fix).
+    /// </summary>
+    private readonly HashSet<int> _managedPids = new();
+
     public LlamaSwapProcessManager(string? appDirectory = null, string? userDirectory = null)
     {
         AppDirectory = appDirectory ?? AppDomain.CurrentDomain.BaseDirectory;
@@ -78,6 +83,7 @@ public class LlamaSwapProcessManager : IDisposable
     /// <summary>
     /// Resolves the llama.cpp binary directory by inspecting the default path
     /// and common installation locations.
+    /// M4: Only trusts known directories — no arbitrary PATH resolution.
     /// </summary>
     public void ResolveLlamaServerPath()
     {
@@ -118,18 +124,8 @@ public class LlamaSwapProcessManager : IDisposable
             }
         }
 
-        // Check PATH for llama-server
-        var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in pathEnv.Split(Path.PathSeparator))
-        {
-            var fullPath = Path.Combine(dir, "llama-server");
-            if (File.Exists(fullPath))
-            {
-                LlamaCppDirectory = dir;
-                return;
-            }
-        }
-
+        // M4: Do NOT resolve from PATH — only trust known directories
+        // This prevents an attacker from placing a malicious llama-server in PATH
         LlamaCppDirectory = null;
     }
 
@@ -227,17 +223,40 @@ public class LlamaSwapProcessManager : IDisposable
             {
                 try
                 {
-                    var psiUnblock = new ProcessStartInfo
+                    // H4: Validate executable path before Unblock-File to prevent command injection
+                    var exeDir = Path.GetDirectoryName(ExecutablePath);
+                    if (string.IsNullOrEmpty(exeDir) || !Directory.Exists(exeDir))
                     {
-                        FileName = "powershell.exe",
-                        Arguments = $"Unblock-File -Path \"{ExecutablePath}\"",
-                        UseShellExecute = true,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    var proc = Process.Start(psiUnblock);
-                    if (proc is not null)
-                        await proc.WaitForExitAsync();
+                        LogMessage?.Invoke($"[manager] cannot unblock: directory not found for {ExecutablePath}");
+                    }
+                    else
+                    {
+                        // Verify the file is actually in the expected directory
+                        var resolvedName = Path.GetFileName(ExecutablePath);
+                        var actualPath = Path.Combine(exeDir, resolvedName);
+                        if (!File.Exists(actualPath))
+                        {
+                            LogMessage?.Invoke($"[manager] cannot unblock: file not found at {actualPath}");
+                        }
+                        else
+                        {
+                            var psiUnblock = new ProcessStartInfo
+                            {
+                                FileName = "powershell.exe",
+                                Arguments = $"-NoProfile -NonInteractive -Command \"Unblock-File -Path '{actualPath}'\"",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true,
+                                WindowStyle = ProcessWindowStyle.Hidden
+                            };
+                            var proc = Process.Start(psiUnblock);
+                            if (proc is not null)
+                            {
+                                proc.WaitForExit(5000);
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex) { LogMessage?.Invoke($"[manager] unload failed: {ex.Message}"); }
             }
@@ -262,6 +281,12 @@ public class LlamaSwapProcessManager : IDisposable
             _process.Start();
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
+
+            // H3: Track managed PID
+            lock (_managedPids)
+            {
+                _managedPids.Add(_process.Id);
+            }
 
             var apiReady = await WaitForApiReadyAsync(15);
 
@@ -313,9 +338,27 @@ public class LlamaSwapProcessManager : IDisposable
     {
         LogMessage?.Invoke($"[manager] gracefully stopping llama processes: {reason}");
 
-        var processes = Process.GetProcessesByName("llama-swap")
-            .Concat(Process.GetProcessesByName("llama-server"))
-            .ToList();
+        // H3: Only stop processes we actually manage
+        int[] managedPids;
+        lock (_managedPids)
+        {
+            managedPids = _managedPids.ToArray();
+        }
+
+        var processes = new List<Process>();
+        if (managedPids.Length > 0)
+        {
+            foreach (var pid in managedPids)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(pid);
+                    if (!p.HasExited)
+                        processes.Add(p);
+                }
+                catch { /* Process already exited */ }
+            }
+        }
 
         if (processes.Count == 0)
         {
@@ -378,20 +421,28 @@ public class LlamaSwapProcessManager : IDisposable
     private async Task<bool> KillAllLlamaProcessesAsync(string reason)
     {
         LogMessage?.Invoke($"[manager] killing llama processes: {reason}");
-        var names = new[] { "llama-swap", "llama-server" };
-        foreach (var name in names)
+
+        // H3: Only kill processes we manage
+        int[] managedPids;
+        lock (_managedPids)
         {
-            foreach (var p in Process.GetProcessesByName(name))
+            managedPids = _managedPids.ToArray();
+        }
+
+        foreach (var pid in managedPids)
+        {
+            try
             {
-                try
+                var p = Process.GetProcessById(pid);
+                if (!p.HasExited)
                 {
-                    LogMessage?.Invoke($"[manager] kill {name} pid={p.Id}");
+                    LogMessage?.Invoke($"[manager] kill pid={pid} name={p.ProcessName}");
                     p.Kill(entireProcessTree: true);
                 }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[manager] kill failed {name} pid={p.Id}: {ex.Message}");
-                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage?.Invoke($"[manager] kill failed pid={pid}: {ex.Message}");
             }
         }
 
@@ -591,10 +642,16 @@ public class LlamaSwapProcessManager : IDisposable
 
     private async Task ForceKillAsync()
     {
-        foreach (var p in Process.GetProcessesByName("llama-swap"))
-            try { p.Kill(true); } catch { }
-        foreach (var p in Process.GetProcessesByName("llama-server"))
-            try { p.Kill(true); } catch { }
+        // H3: Only kill managed PIDs
+        int[] managedPids;
+        lock (_managedPids)
+        {
+            managedPids = _managedPids.ToArray();
+        }
+        foreach (var pid in managedPids)
+        {
+            try { var p = Process.GetProcessById(pid); p.Kill(true); } catch { }
+        }
         await Task.Delay(1000);
         SetStatus(LlamaSwapStatus.Stopped);
     }
@@ -780,6 +837,15 @@ public class LlamaSwapProcessManager : IDisposable
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
+        // H3: Remove this PID from managed list
+        if (_process is not null)
+        {
+            lock (_managedPids)
+            {
+                _managedPids.Remove(_process.Id);
+            }
+        }
+
         SetStatus(LlamaSwapStatus.Stopped);
         ApiBaseUrl = null;
     }

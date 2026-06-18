@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Security;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -32,9 +33,37 @@ public class LlamaCppDownloader : IDisposable
         _userDirectory = userDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
         _downloadsDir = Path.Combine(_userDirectory, ".updates");
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        _http = CreateSecureHttpClient();
         _http.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaSwapManager");
+    }
+
+    /// <summary>
+    /// Creates an HttpClient with explicit SSL certificate validation (H2 fix).
+    /// Also supports GITHUB_TOKEN for authenticated API calls (M2).
+    /// </summary>
+    private static HttpClient CreateSecureHttpClient()
+    {
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+            {
+                if (errors != SslPolicyErrors.None)
+                    return false;
+                return true;
+            }
+        };
+
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
+
+        // M2: Support GITHUB_TOKEN env var
+        var githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        if (!string.IsNullOrEmpty(githubToken))
+        {
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", githubToken);
+        }
+
+        return client;
     }
 
     /// <summary>
@@ -633,6 +662,13 @@ public class LlamaCppDownloader : IDisposable
                     proc?.WaitForExit();
                 }
                 catch { /* non-critical */ }
+
+                // H1: Verify codesign on extracted binary
+                var codesignOk = VerifyCodesign(expectedPath);
+                if (!codesignOk)
+                {
+                    LogMessage?.Invoke("[llama.cpp] Warning: codesign verification failed — binary may not be signed by a known developer");
+                }
             }
 
             // Success — remove backup
@@ -1626,7 +1662,42 @@ public class LlamaCppDownloader : IDisposable
     }
 
     // ---- End CUDA Version-Aware Asset Selection ----
-}
+
+    // =====================================================================
+    // H1: macOS codesign verification
+    // =====================================================================
+
+    /// <summary>
+    /// Verifies that a macOS binary has a valid codesignature.
+    /// Returns true if codesign --verify succeeds.
+    /// Does NOT block installation — only logs a warning if verification fails.
+    /// </summary>
+    private bool VerifyCodesign(string exePath)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "codesign",
+                Arguments = $"--verify --verbose=2 \"{exePath}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return false;
+
+            proc.WaitForExit(10000);
+            var output = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
+            return proc.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }}
 
 // Minimal tar.gz reader (since System.IO.Compression doesn't include TarFile in .NET 9 on all platforms)
 internal sealed class TarEntry
@@ -1747,4 +1818,6 @@ internal sealed class TarArchive : IDisposable
         _gzip?.Dispose();
         _baseStream?.Dispose();
     }
+
+
 }
