@@ -744,7 +744,9 @@ public class UpdateService : IDisposable
     private bool AssetMatchesPlatform(string assetName)
     {
         if (_osName == "darwin")
-            return assetName.Contains("darwin", StringComparison.OrdinalIgnoreCase) &&
+            // GitHub uses "macos" in asset names, not "darwin"
+            return (assetName.Contains("darwin", StringComparison.OrdinalIgnoreCase) ||
+                    assetName.Contains("macos", StringComparison.OrdinalIgnoreCase)) &&
                    assetName.Contains(_arch, StringComparison.OrdinalIgnoreCase);
 
         if (_osName == "windows")
