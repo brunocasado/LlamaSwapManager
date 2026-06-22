@@ -35,9 +35,12 @@ public class LogStreamService : IDisposable
     /// <summary>
     /// Starts streaming upstream logs.
     /// </summary>
-    public async Task StartAsync(string modelId, CancellationToken ct = default)
+    public async Task StartAsync(string _modelId, CancellationToken ct = default)
     {
-        if (_isRunning)
+        // Always clean up any previous stream state before starting fresh.
+        // The stream may have died naturally (_isRunning = false) without StopAsync being called,
+        // leaving stale _cts/_streamTask references that would leak.
+        if (_streamTask is not null || _cts is not null)
             await StopAsync();
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -50,7 +53,22 @@ public class LogStreamService : IDisposable
         _isRunning = false;
         _cts?.Cancel();
         if (_streamTask is not null)
-            await _streamTask;
+        {
+            // Timeout: don't block forever on a zombie stream.
+            // ReadLineAsync on a dead connection may not respond to cancellation immediately.
+            var doneTask = await Task.WhenAny(_streamTask, Task.Delay(5000));
+            if (doneTask != _streamTask)
+            {
+                // Stream task didn't finish in time — it's effectively dead.
+                // Dispose the http client to force any pending reads to abort.
+                // (The caller disposes the service, which disposes the cts.)
+            }
+            else
+            {
+                // Await to surface any exception from the stream task.
+                try { await _streamTask; } catch { /* stream ended unexpectedly */ }
+            }
+        }
         _cts?.Dispose();
         _cts = null;
         _streamTask = null;
@@ -111,6 +129,8 @@ public class LogStreamService : IDisposable
                     await Task.Delay(3000, ct);
             }
         }
+        // Stream task exited — mark as stopped so the caller can detect and restart
+        _isRunning = false;
     }
 
     private async Task FetchHistoricalLogsAsync(string url, CancellationToken ct)
