@@ -1510,28 +1510,25 @@ public partial class MainViewModel : ObservableObject
     }
 
     // --- Log streaming (llama-swap /logs/stream/upstream) ---
+    // The SSE endpoint is generic (not model-specific). We keep a single persistent
+    // connection alive and only reconnect if it actually dies.
     private async Task StartLogStreamingAsync()
     {
-        if (_logStreamService is null)
-        {
-            // First start — no previous stream to stop.
-            _logStreamService = new LogStreamService(
-                new HttpClient { Timeout = TimeSpan.FromSeconds(30) },
-                _processManager.DetectedApiBaseUrl!);
-            _logStreamService.LogReceived += OnUpstreamLogReceived;
-            _logStreamCts = new CancellationTokenSource();
-
-            try
-            {
-                await _logStreamService.StartAsync("upstream", _logStreamCts.Token);
-            }
-            catch { /* stream may fail if API is temporarily unavailable */ }
+        // If the stream is already alive, do nothing — no need to reconnect.
+        if (_logStreamService?.IsRunning == true)
             return;
-        }
 
-        // Restart: start new stream BEFORE stopping old one — zero-gap transition.
-        var oldService = _logStreamService;
-        var oldCts = _logStreamCts;
+        // Stream is dead or first start — create a new connection.
+        if (_logStreamService != null)
+        {
+            // Clean up dead service before starting fresh.
+            _logStreamService.LogReceived -= OnUpstreamLogReceived;
+            _logStreamService.Dispose();
+            _logStreamService = null;
+        }
+        _logStreamCts?.Cancel();
+        _logStreamCts?.Dispose();
+        _logStreamCts = null;
 
         _logStreamService = new LogStreamService(
             new HttpClient { Timeout = TimeSpan.FromSeconds(30) },
@@ -1544,20 +1541,6 @@ public partial class MainViewModel : ObservableObject
             await _logStreamService.StartAsync("upstream", _logStreamCts.Token);
         }
         catch { /* stream may fail if API is temporarily unavailable */ }
-
-        // Tear down old stream in background (don't block).
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                oldService.LogReceived -= OnUpstreamLogReceived;
-                await oldService.StopAsync();
-                oldService.Dispose();
-            }
-            catch { /* ignore */ }
-            oldCts?.Cancel();
-            oldCts?.Dispose();
-        });
     }
 
     private async Task StopLogStreamingAsync()
