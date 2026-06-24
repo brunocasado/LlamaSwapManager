@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -70,9 +71,20 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _logText = "";
     [ObservableProperty] private string _llamaSwapLogText = "";
     [ObservableProperty] private string _upstreamLogText = "";
-    private readonly StringBuilder _globalLogBuffer = new();
-    private readonly StringBuilder _swapLogBuffer = new();
-    private readonly StringBuilder _upstreamLogBuffer = new();
+    private readonly Queue<string> _globalLogLines = new();
+    private readonly Queue<string> _swapLogLines = new();
+    private readonly Queue<string> _upstreamLogLines = new();
+    private const int MaxLogLines = 5000;
+    // Throttle: max UI updates per second for log text properties
+    private readonly object _logThrottleLock = new();
+    private DateTime _lastUpstreamUiUpdate = DateTime.MinValue;
+    private DateTime _lastSwapUiUpdate = DateTime.MinValue;
+    private const int UiUpdateIntervalMs = 100; // max 10 updates/sec
+    // Cached compiled regex for filters
+    private System.Text.RegularExpressions.Regex? _cachedUpstreamRegex;
+    private string? _cachedUpstreamRegexText;
+    private System.Text.RegularExpressions.Regex? _cachedProxyRegex;
+    private string? _cachedProxyRegexText;
 
     // Models
     [ObservableProperty] private ObservableCollection<ModelEditItem> _models = new();
@@ -201,9 +213,9 @@ public partial class MainViewModel : ObservableObject
                       LogText = "";
                       LlamaSwapLogText = "";
                       UpstreamLogText = "";
-                      _globalLogBuffer.Clear();
-                      _swapLogBuffer.Clear();
-                      _upstreamLogBuffer.Clear();
+                      _globalLogLines.Clear();
+                      _swapLogLines.Clear();
+                      _upstreamLogLines.Clear();
                       _logStreamService?.ClearLogs();
                       UpstreamLogFilterText = "";
                       ProxyLogFilterText = "";
@@ -439,12 +451,13 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        _globalLogBuffer.AppendLine(message);
+        _globalLogLines.Enqueue(message);
+        while (_globalLogLines.Count > MaxLogLines) _globalLogLines.Dequeue();
         LogMessages.Add(message);
 
         // Throttle LogText updates to every 10 messages to reduce UI churn
         if (LogMessages.Count % 10 == 0)
-            LogText = _globalLogBuffer.ToString();
+            LogText = string.Join("\n", _globalLogLines.ToArray().Skip(Math.Max(0, _globalLogLines.Count - 500)));
 
         // Split messages by source:
         // [out] = stdout from llama-swap process (upstream llama-server logs proxied through)
@@ -460,8 +473,9 @@ public partial class MainViewModel : ObservableObject
         else if (message.StartsWith("[err] "))
         {
             // llama-swap proxy log (stderr)
-            _swapLogBuffer.AppendLine(message.Substring(6)); // Strip [err] prefix
-            UpdateFilteredLogTexts();
+            _swapLogLines.Enqueue(message.Substring(6)); // Strip [err] prefix
+            while (_swapLogLines.Count > MaxLogLines) _swapLogLines.Dequeue();
+            UpdateFilteredLogTexts(updateUpstream: false, updateProxy: true);
         }
         // [manager] and [ui] messages go to global log only, not to specific panels
     }
@@ -1557,60 +1571,88 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        _upstreamLogBuffer.AppendLine(line);
-        UpdateFilteredLogTexts();
+        _upstreamLogLines.Enqueue(line);
+        while (_upstreamLogLines.Count > MaxLogLines) _upstreamLogLines.Dequeue();
+        UpdateFilteredLogTexts(updateUpstream: true, updateProxy: false);
     }
 
-    private void UpdateFilteredLogTexts()
+    private void UpdateFilteredLogTexts(bool updateUpstream = true, bool updateProxy = true)
     {
-        // Filter upstream logs
-        if (string.IsNullOrWhiteSpace(UpstreamLogFilterText))
+        if (updateUpstream)
         {
-            UpstreamLogText = _upstreamLogBuffer.ToString();
-        }
-        else
-        {
-            try
+            lock (_logThrottleLock)
             {
-                var regex = new System.Text.RegularExpressions.Regex(UpstreamLogFilterText, System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
-                UpstreamLogText = ApplyFilter(_upstreamLogBuffer.ToString(), regex);
+                if ((DateTime.UtcNow - _lastUpstreamUiUpdate).TotalMilliseconds < UiUpdateIntervalMs)
+                    return; // throttle: skip this update
+                _lastUpstreamUiUpdate = DateTime.UtcNow;
             }
-            catch
+
+            if (string.IsNullOrWhiteSpace(UpstreamLogFilterText))
             {
-                UpstreamLogText = _upstreamLogBuffer.ToString();
+                UpstreamLogText = string.Join("\n", _upstreamLogLines);
+            }
+            else
+            {
+                try
+                {
+                    var regex = GetOrBuildRegex(ref _cachedUpstreamRegex, ref _cachedUpstreamRegexText, UpstreamLogFilterText);
+                    var filtered = new List<string>();
+                    foreach (var line in _upstreamLogLines)
+                    {
+                        if (regex.IsMatch(line))
+                            filtered.Add(line);
+                    }
+                    UpstreamLogText = string.Join("\n", filtered);
+                }
+                catch
+                {
+                    UpstreamLogText = string.Join("\n", _upstreamLogLines);
+                }
             }
         }
 
-        // Filter proxy logs
-        if (string.IsNullOrWhiteSpace(ProxyLogFilterText))
+        if (updateProxy)
         {
-            LlamaSwapLogText = _swapLogBuffer.ToString();
-        }
-        else
-        {
-            try
+            lock (_logThrottleLock)
             {
-                var regex = new System.Text.RegularExpressions.Regex(ProxyLogFilterText, System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
-                LlamaSwapLogText = ApplyFilter(_swapLogBuffer.ToString(), regex);
+                if ((DateTime.UtcNow - _lastSwapUiUpdate).TotalMilliseconds < UiUpdateIntervalMs)
+                    return; // throttle: skip this update
+                _lastSwapUiUpdate = DateTime.UtcNow;
             }
-            catch
+
+            if (string.IsNullOrWhiteSpace(ProxyLogFilterText))
             {
-                LlamaSwapLogText = _swapLogBuffer.ToString();
+                LlamaSwapLogText = string.Join("\n", _swapLogLines);
+            }
+            else
+            {
+                try
+                {
+                    var regex = GetOrBuildRegex(ref _cachedProxyRegex, ref _cachedProxyRegexText, ProxyLogFilterText);
+                    var filtered = new List<string>();
+                    foreach (var line in _swapLogLines)
+                    {
+                        if (regex.IsMatch(line))
+                            filtered.Add(line);
+                    }
+                    LlamaSwapLogText = string.Join("\n", filtered);
+                }
+                catch
+                {
+                    LlamaSwapLogText = string.Join("\n", _swapLogLines);
+                }
             }
         }
     }
 
-    private static string ApplyFilter(string text, System.Text.RegularExpressions.Regex regex)
+    private static Regex GetOrBuildRegex(ref Regex? cached, ref string? cachedText, string pattern)
     {
-        var sb = new System.Text.StringBuilder();
-        using var reader = new System.IO.StringReader(text);
-        string? line;
-        while ((line = reader.ReadLine()) != null)
-        {
-            if (regex.IsMatch(line))
-                sb.AppendLine(line);
-        }
-        return sb.ToString();
+        if (cached is not null && cachedText == pattern)
+            return cached;
+
+        cachedText = pattern;
+        cached = new Regex(pattern, RegexOptions.Compiled | RegexOptions.Multiline);
+        return cached;
     }
 
     partial void OnUpstreamLogFilterTextChanged(string value)
