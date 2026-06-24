@@ -577,9 +577,16 @@ public partial class MainViewModel : ObservableObject
         await Task.Run(() =>
         {
             _processManager.RefreshPaths();
-            _processManager.DetectApiUrl();
-            _processManager.DetectLlamaServerUrl();
         });
+
+        // Await detection so the URL is resolved before UI update.
+        var apiBaseUrl = await _processManager.DetectApiBaseUrlAsync();
+        if (apiBaseUrl != null)
+            _processManager.ApiBaseUrl = apiBaseUrl;
+
+        var llamaServerUrl = await _processManager.DetectLlamaServerBaseUrlAsync();
+        if (llamaServerUrl != null)
+            _processManager.LlamaServerBaseUrl = llamaServerUrl;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -1514,14 +1521,17 @@ public partial class MainViewModel : ObservableObject
     // connection alive and only reconnect if it actually dies.
     private async Task StartLogStreamingAsync()
     {
-        // If the stream is already alive, do nothing — no need to reconnect.
+        var baseUrl = _processManager.DetectedApiBaseUrl;
+        if (string.IsNullOrEmpty(baseUrl))
+            return;
+
+        // If the stream is already alive on the same URL, do nothing.
         if (_logStreamService?.IsRunning == true)
             return;
 
         // Stream is dead or first start — create a new connection.
         if (_logStreamService != null)
         {
-            // Clean up dead service before starting fresh.
             _logStreamService.LogReceived -= OnUpstreamLogReceived;
             _logStreamService.Dispose();
             _logStreamService = null;
@@ -1532,7 +1542,7 @@ public partial class MainViewModel : ObservableObject
 
         _logStreamService = new LogStreamService(
             new HttpClient { Timeout = TimeSpan.FromSeconds(30) },
-            _processManager.DetectedApiBaseUrl!);
+            baseUrl);
         _logStreamService.LogReceived += OnUpstreamLogReceived;
         _logStreamCts = new CancellationTokenSource();
 

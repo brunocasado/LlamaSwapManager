@@ -34,8 +34,8 @@ public class LlamaSwapProcessManager : IDisposable
     public LlamaSwapStatus Status { get; private set; } = LlamaSwapStatus.Stopped;
     public string? ExecutablePath { get; private set; }
     public string? ConfigPath { get; private set; }
-    public string? ApiBaseUrl { get; private set; }
-    public string? LlamaServerBaseUrl { get; private set; }
+    public string? ApiBaseUrl { get; set; }
+    public string? LlamaServerBaseUrl { get; set; }
     public string? LlamaSwapExePath => ExecutablePath;
     public string? DetectedApiBaseUrl => ApiBaseUrl;
     public string? LlamaCppDirectory { get; private set; }
@@ -656,7 +656,7 @@ public class LlamaSwapProcessManager : IDisposable
         SetStatus(LlamaSwapStatus.Stopped);
     }
 
-    private async Task<string?> DetectApiBaseUrlAsync()
+    public async Task<string?> DetectApiBaseUrlAsync()
     {
         // llama-swap default port — just test it directly
         if (await TestEndpointAsync("http://127.0.0.1:8080"))
@@ -687,7 +687,7 @@ public class LlamaSwapProcessManager : IDisposable
     /// The /running response includes a "proxy" field with the llama-server address.
     /// Falls back to port scanning if llama-swap is unreachable or no model is loaded.
     /// </summary>
-    private async Task<string?> DetectLlamaServerBaseUrlAsync()
+    public async Task<string?> DetectLlamaServerBaseUrlAsync()
     {
         // Primary: query llama-swap /running for the upstream proxy URL
         var swapBaseUrl = await DetectApiBaseUrlAsync();
