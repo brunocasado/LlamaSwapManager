@@ -713,8 +713,10 @@ public class LlamaSwapProcessManager : IDisposable
                     if (proxyMatch.Success)
                     {
                         var proxyUrl = proxyMatch.Groups[1].Value;
-                        // Normalize: llama-swap returns "localhost", ensure we use 127.0.0.1
-                        proxyUrl = proxyUrl.Replace("localhost", "127.0.0.1");
+                        // Normalize: llama-swap returns "localhost" meaning the server's own host.
+                        // Resolve it to the actual llama-swap host so remote setups work.
+                        var swapUri = new Uri(swapBaseUrl);
+                        proxyUrl = proxyUrl.Replace("localhost", swapUri.Host);
                         return proxyUrl;
                     }
                 }
