@@ -119,10 +119,6 @@ public partial class MainViewModel : ObservableObject
     private LogStreamService? _logStreamService;
     private CancellationTokenSource? _logStreamCts;
 
-    // Delta-based real-time tokens/sec from n_decode_total
-    private double _lastDecodeTotal;
-    private DateTime _lastDecodeTime;
-
     // Update subsystem
     public UpdateViewModel UpdateViewModel { get; }
 
@@ -1662,27 +1658,11 @@ public partial class MainViewModel : ObservableObject
                 var metrics = await _metricsService.GetMetricsAsync();
                 if (metrics != null)
                 {
-                    // Calculate real-time tokens/sec from n_decode_total delta.
-                    // n_decode_total updates during generation, unlike tokens_predicted_total
-                    // which only updates after the slot finishes processing.
-                    var now = DateTime.UtcNow;
-                    double tps = 0;
-                    if (_lastDecodeTime != default)
-                    {
-                        var elapsed = (now - _lastDecodeTime).TotalSeconds;
-                        var delta = metrics.DecodeTotal - _lastDecodeTotal;
-                        if (elapsed > 0 && delta > 0)
-                            tps = delta / elapsed;
-                    }
-
-                    _lastDecodeTotal = metrics.DecodeTotal;
-                    _lastDecodeTime = now;
-
                     Dispatcher.UIThread.Post(() =>
                     {
                         PrefillTokens = (long)metrics.PromptTokens;
                         DecodeTokens = (long)metrics.EvalTokens;
-                        TokensPerSecond = tps;
+                        TokensPerSecond = metrics.TokensPerSecond;
                         ActiveSlots = metrics.ActiveSlots;
                     });
                 }

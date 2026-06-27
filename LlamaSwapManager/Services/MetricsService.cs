@@ -82,10 +82,6 @@ public class MetricsService
         if (data.MetricValues.TryGetValue("requests_processing", out var active))
             data.ActiveSlots = (int)active;
 
-        // n_decode_total = real-time decode counter (updates during generation)
-        if (data.MetricValues.TryGetValue("n_decode_total", out var decodeTotal))
-            data.DecodeTotal = decodeTotal;
-
         return data;
     }
 }
@@ -96,6 +92,5 @@ public class MetricsData
     public double EvalTokens { get; set; }
     public double TokensPerSecond { get; set; }
     public int ActiveSlots { get; set; }
-    public double DecodeTotal { get; set; }
     public Dictionary<string, double> MetricValues { get; } = new();
 }
