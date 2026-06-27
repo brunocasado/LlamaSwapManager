@@ -592,10 +592,9 @@
 
           <!-- Log filter + logs -->
           <Grid Grid.Row="2" RowDefinitions="Auto,*">
-          <!-- Filter bars -->
-          <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="16">
-          <!-- Upstream filter -->
-          <Border Grid.Column="0" Padding="10,6" Background="#1E1E2E" CornerRadius="8" Margin="0,0,0,8">
+          <!-- Filter bar -->
+          <Grid Grid.Row="0">
+          <Border Padding="10,6" Background="#1E1E2E" CornerRadius="8" Margin="0,0,0,8">
           <Grid ColumnDefinitions="24,*,Auto" ColumnSpacing="8">
             <TextBlock Grid.Column="0" Text="🔍" VerticalAlignment="Center" Foreground="#6C7086" FontSize="12" />
             <TextBox Grid.Column="1" Text="{Binding UpstreamLogFilterText, UpdateSourceTrigger=PropertyChanged}"
@@ -604,22 +603,10 @@
             <Button Grid.Column="2" Content="✕" Command="{Binding ClearLogCommand}" Padding="6,2" FontSize="10" Foreground="#6C7086" />
           </Grid>
           </Border>
-          <!-- Proxy filter -->
-          <Border Grid.Column="1" Padding="10,6" Background="#1E1E2E" CornerRadius="8" Margin="0,0,0,8">
-          <Grid ColumnDefinitions="24,*,Auto" ColumnSpacing="8">
-            <TextBlock Grid.Column="0" Text="🔍" VerticalAlignment="Center" Foreground="#6C7086" FontSize="12" />
-            <TextBox Grid.Column="1" Text="{Binding ProxyLogFilterText, UpdateSourceTrigger=PropertyChanged}"
-                     PlaceholderText="Filter proxy logs (regex)"
-                     Foreground="#CDD6F4" Background="#313244" BorderBrush="#45475A" FontSize="11" />
-            <Button Grid.Column="2" Content="✕" Command="{Binding ClearLogCommand}" Padding="6,2" FontSize="10" Foreground="#6C7086" />
-          </Grid>
-          </Border>
           </Grid>
 
-          <!-- Log windows (side by side) -->
-          <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="16">
-          <!-- Upstream Logs -->
-          <Border Grid.Column="0" Padding="12" Background="#313244" CornerRadius="8">
+          <!-- Log window (full width) -->
+          <Border Grid.Row="1" Padding="12" Background="#313244" CornerRadius="8">
           <Grid RowDefinitions="Auto,*">
             <TextBlock Grid.Row="0" Text="Upstream Logs" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" Margin="0,0,0,6" />
             <ScrollViewer Grid.Row="1" x:Name="UpstreamLogScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
@@ -634,24 +621,6 @@
             </ScrollViewer>
           </Grid>
           </Border>
-
-          <!-- Proxy Logs -->
-          <Border Grid.Column="1" Padding="12" Background="#313244" CornerRadius="8">
-          <Grid RowDefinitions="Auto,*">
-            <TextBlock Grid.Row="0" Text="Proxy Logs" FontSize="12" FontWeight="Bold" Foreground="#FAB387" Margin="0,0,0,6" />
-            <ScrollViewer Grid.Row="1" x:Name="ProxyLogScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
-              <TextBox x:Name="ProxyLogTextBox"
-                       Text="{Binding LlamaSwapLogText}"
-                       Background="#1E1E2E"
-                       Foreground="#CDD6F4"
-                       IsReadOnly="True"
-                       TextWrapping="NoWrap"
-                       FontFamily="Consolas, monospace"
-                       FontSize="11" />
-            </ScrollViewer>
-          </Grid>
-          </Border>
-          </Grid>
           </Grid>
 
             <!-- Footer -->
