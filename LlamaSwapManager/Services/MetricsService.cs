@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Net.Http;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -37,43 +35,6 @@ public class MetricsService
 
             var content = await response.Content.ReadAsStringAsync();
             return ParsePrometheusMetrics(content);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Poll llama-server /slots endpoint for real-time tokens/sec.
-    /// Returns the sum of tokens_second across all processing slots, or null on failure.
-    /// This is much faster and lighter than /metrics — just a small JSON response.
-    /// </summary>
-    public async Task<double?> GetTokensPerSecondAsync()
-    {
-        if (string.IsNullOrEmpty(_apiBaseUrl)) return null;
-
-        try
-        {
-            var response = await _httpClient.GetAsync(_apiBaseUrl + "/slots");
-            if (!response.IsSuccessStatusCode) return null;
-
-            var content = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(content);
-
-            double totalTps = 0;
-            if (doc.RootElement.TryGetProperty("slots", out var slots))
-            {
-                foreach (var slot in slots.EnumerateArray())
-                {
-                    if (slot.TryGetProperty("tokens_second", out var tps))
-                    {
-                        totalTps += tps.GetDouble();
-                    }
-                }
-            }
-
-            return totalTps;
         }
         catch
         {

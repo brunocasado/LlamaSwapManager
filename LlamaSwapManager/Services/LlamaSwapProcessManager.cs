@@ -140,11 +140,6 @@ public class LlamaSwapProcessManager : IDisposable
     /// </summary>
     public void RefreshLlamaServerUrl() => _ = Task.Run(async () => LlamaServerBaseUrl = await DetectLlamaServerBaseUrlAsync());
 
-    /// <summary>
-    /// Async version that awaits detection before returning.
-    /// </summary>
-    public async Task RefreshLlamaServerUrlAsync() => LlamaServerBaseUrl = await DetectLlamaServerBaseUrlAsync();
-
     private string? ResolveExecutable()
     {
         var exeSuffix = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".exe" : "";

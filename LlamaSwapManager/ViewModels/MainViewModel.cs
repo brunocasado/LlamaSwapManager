@@ -1655,25 +1655,15 @@ public partial class MainViewModel : ObservableObject
                     _metricsService.SetApiBaseUrl(baseUrl);
                 }
 
-                // Fetch real-time tokens/sec from /slots (live during generation, 0 when idle)
-                var tps = await _metricsService.GetTokensPerSecondAsync();
-
-                // Fetch full metrics for totals
                 var metrics = await _metricsService.GetMetricsAsync();
-
-                if (tps != null || metrics != null)
+                if (metrics != null)
                 {
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (tps != null)
-                            TokensPerSecond = tps.Value;
-
-                        if (metrics != null)
-                        {
-                            PrefillTokens = (long)metrics.PromptTokens;
-                            DecodeTokens = (long)metrics.EvalTokens;
-                            ActiveSlots = metrics.ActiveSlots;
-                        }
+                        PrefillTokens = (long)metrics.PromptTokens;
+                        DecodeTokens = (long)metrics.EvalTokens;
+                        TokensPerSecond = metrics.TokensPerSecond;
+                        ActiveSlots = metrics.ActiveSlots;
                     });
                 }
 
