@@ -17,6 +17,7 @@ using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
 using LlamaSwapManager.Models;
 using LlamaSwapManager.Services;
+using OxyPlot;
 
 namespace LlamaSwapManager.ViewModels;
 
@@ -267,28 +268,28 @@ public partial class MainViewModel : ObservableObject
         TokensPerSecondSeries = new OxyPlot.Series.LineSeries
         {
             Title = "Tokens/sec",
-            Color = OxyPlot.OxyColor.Parse("#FAB387"),
+            Color = OxyColor.Parse("#FAB387"),
             StrokeThickness = 2,
             MarkerType = OxyPlot.MarkerType.None
         };
         PrefillSeries = new OxyPlot.Series.LineSeries
         {
             Title = "Prefill",
-            Color = OxyPlot.OxyColor.Parse("#89B4FA"),
+            Color = OxyColor.Parse("#89B4FA"),
             StrokeThickness = 1.5,
             MarkerType = OxyPlot.MarkerType.None
         };
         DecodeSeries = new OxyPlot.Series.LineSeries
         {
             Title = "Decode",
-            Color = OxyPlot.OxyColor.Parse("#A6E3A1"),
+            Color = OxyColor.Parse("#A6E3A1"),
             StrokeThickness = 1.5,
             MarkerType = OxyPlot.MarkerType.None
         };
         ActiveSlotsSeries = new OxyPlot.Series.LineSeries
         {
             Title = "Slots",
-            Color = OxyPlot.OxyColor.Parse("#F5C2E7"),
+            Color = OxyColor.Parse("#F5C2E7"),
             StrokeThickness = 1.5,
             MarkerType = OxyPlot.MarkerType.None
         };
@@ -296,46 +297,46 @@ public partial class MainViewModel : ObservableObject
         // Initialize OxyPlot chart models (Catppuccin Mocha theme)
         TokensPerSecondPlotModel = new OxyPlot.PlotModel
         {
-            Background = OxyPlot.OxyColor.Parse("#1E1E2E"),
+            Background = OxyColor.Parse("#1E1E2E"),
         };
         TokensPerSecondPlotModel.Axes.Add(new OxyPlot.Axes.LinearAxis
         {
             Position = OxyPlot.Axes.AxisPosition.Bottom,
-            TextColor = OxyPlot.OxyColor.Parse("#6C7086"),
-            AxislineColor = OxyPlot.OxyColor.Parse("#45475A")
+            TextColor = OxyColor.Parse("#6C7086"),
+            AxislineColor = OxyColor.Parse("#45475A")
         });
         TokensPerSecondPlotModel.Axes.Add(new OxyPlot.Axes.LinearAxis
         {
             Position = OxyPlot.Axes.AxisPosition.Left,
             Title = "tokens/s",
-            TextColor = OxyPlot.OxyColor.Parse("#FAB387"),
-            AxislineColor = OxyPlot.OxyColor.Parse("#45475A")
+            TextColor = OxyColor.Parse("#FAB387"),
+            AxislineColor = OxyColor.Parse("#45475A")
         });
         TokensPerSecondPlotModel.Series.Add(TokensPerSecondSeries);
 
         TokensSlotsPlotModel = new OxyPlot.PlotModel
         {
-            Background = OxyPlot.OxyColor.Parse("#1E1E2E"),
+            Background = OxyColor.Parse("#1E1E2E"),
         };
         TokensSlotsPlotModel.Axes.Add(new OxyPlot.Axes.LinearAxis
         {
             Position = OxyPlot.Axes.AxisPosition.Bottom,
-            TextColor = OxyPlot.OxyColor.Parse("#6C7086"),
-            AxislineColor = OxyPlot.OxyColor.Parse("#45475A")
+            TextColor = OxyColor.Parse("#6C7086"),
+            AxislineColor = OxyColor.Parse("#45475A")
         });
         TokensSlotsPlotModel.Axes.Add(new OxyPlot.Axes.LinearAxis
         {
             Position = OxyPlot.Axes.AxisPosition.Left,
             Title = "tokens/s",
-            TextColor = OxyPlot.OxyColor.Parse("#A6ADC8"),
-            AxislineColor = OxyPlot.OxyColor.Parse("#45475A")
+            TextColor = OxyColor.Parse("#A6ADC8"),
+            AxislineColor = OxyColor.Parse("#45475A")
         });
         TokensSlotsPlotModel.Axes.Add(new OxyPlot.Axes.LinearAxis
         {
             Position = OxyPlot.Axes.AxisPosition.Right,
             Title = "slots",
-            TextColor = OxyPlot.OxyColor.Parse("#F5C2E7"),
-            AxislineColor = OxyPlot.OxyColor.Parse("#45475A"),
+            TextColor = OxyColor.Parse("#F5C2E7"),
+            AxislineColor = OxyColor.Parse("#45475A"),
             Minimum = 0
         });
         TokensSlotsPlotModel.Series.Add(PrefillSeries);
