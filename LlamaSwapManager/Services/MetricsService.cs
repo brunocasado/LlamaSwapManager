@@ -47,7 +47,7 @@ public class MetricsService
         var data = new MetricsData();
 
         // llama-server prometheus format: llamacpp:<metric_name> <value>
-        // Counters: prompt_tokens_total, tokens_predicted_total
+        // Counters: prompt_tokens_total, tokens_predicted_total, n_decode_total
         // Gauges: requests_processing (active slots), predicted_tokens_seconds (tokens/sec)
         //
         // CRITICAL: Use [^\S\n]+ instead of \s+ to avoid matching across lines.
@@ -74,13 +74,17 @@ public class MetricsService
         if (data.MetricValues.TryGetValue("tokens_predicted_total", out var decodeTokens))
             data.EvalTokens = decodeTokens;
 
-        // predicted_tokens_seconds = avg tokens/sec during generation
+        // predicted_tokens_seconds = avg tokens/sec during generation (historical average)
         if (data.MetricValues.TryGetValue("predicted_tokens_seconds", out var tps))
             data.TokensPerSecond = tps;
 
         // requests_processing = active slots (gauge)
         if (data.MetricValues.TryGetValue("requests_processing", out var active))
             data.ActiveSlots = (int)active;
+
+        // n_decode_total = real-time decode counter (updates during generation)
+        if (data.MetricValues.TryGetValue("n_decode_total", out var decodeTotal))
+            data.DecodeTotal = decodeTotal;
 
         return data;
     }
@@ -92,5 +96,6 @@ public class MetricsData
     public double EvalTokens { get; set; }
     public double TokensPerSecond { get; set; }
     public int ActiveSlots { get; set; }
+    public double DecodeTotal { get; set; }
     public Dictionary<string, double> MetricValues { get; } = new();
 }
