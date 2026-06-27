@@ -12,17 +12,26 @@ namespace LlamaSwapManager.Services;
 /// <summary>
 /// Streams logs from llama-swap's /logs/stream/upstream SSE endpoint.
 /// Single persistent stream with automatic reconnect on disconnect.
+/// Batches received lines to reduce UI dispatcher pressure.
 /// </summary>
 public class LogStreamService : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly string _apiBaseUrl;
     private readonly ConcurrentQueue<string> _logBuffer = new();
+
+    /// <summary>
+    /// How long to wait before flushing a batch of accumulated lines.
+    /// Lower = more responsive, higher = less UI pressure.
+    /// </summary>
+    private const int BatchIntervalMs = 100;
+
     private Task? _streamTask;
     private CancellationTokenSource? _cts;
     private bool _isRunning;
 
     public event Action<string>? LogReceived;
+    public event Action<IReadOnlyList<string>>? LogBatchReceived;
     public bool IsRunning => _isRunning;
 
     public LogStreamService(HttpClient httpClient, string apiBaseUrl)
@@ -81,6 +90,10 @@ public class LogStreamService : IDisposable
                 using var stream = await response.Content.ReadAsStreamAsync();
                 using var reader = new StreamReader(stream);
 
+                // Batch accumulator — collect lines and flush periodically
+                var batch = new List<string>(64);
+                var lastFlush = DateTime.UtcNow;
+
                 while (!ct.IsCancellationRequested && _isRunning)
                 {
                     var line = await reader.ReadLineAsync(ct);
@@ -88,7 +101,31 @@ public class LogStreamService : IDisposable
                         break; // Stream ended, reconnect
 
                     _logBuffer.Enqueue(line);
-                    LogReceived?.Invoke(line);
+                    batch.Add(line);
+
+                    // Flush batch on interval or when it gets large
+                    var now = DateTime.UtcNow;
+                    if (batch.Count >= 32 || (now - lastFlush).TotalMilliseconds >= BatchIntervalMs)
+                    {
+                        var snapshot = batch.ToArray();
+                        batch.Clear();
+                        lastFlush = now;
+
+                        // Fire batched event (preferred) and legacy single-line event
+                        LogBatchReceived?.Invoke(snapshot);
+                        foreach (var batchLine in snapshot)
+                            LogReceived?.Invoke(batchLine);
+                    }
+                }
+
+                // Flush remaining lines before reconnect/exit
+                if (batch.Count > 0)
+                {
+                    var snapshot = batch.ToArray();
+                    batch.Clear();
+                    LogBatchReceived?.Invoke(snapshot);
+                    foreach (var batchLine in snapshot)
+                        LogReceived?.Invoke(batchLine);
                 }
             }
             catch (OperationCanceledException)

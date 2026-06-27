@@ -75,11 +75,10 @@ public partial class MainViewModel : ObservableObject
     private readonly Queue<string> _swapLogLines = new();
     private readonly Queue<string> _upstreamLogLines = new();
     private const int MaxLogLines = 5000;
-    // Throttle: max UI updates per second for log text properties
-    private readonly object _logThrottleLock = new();
-    private DateTime _lastUpstreamUiUpdate = DateTime.MinValue;
-    private DateTime _lastSwapUiUpdate = DateTime.MinValue;
-    private const int UiUpdateIntervalMs = 100; // max 10 updates/sec
+    /// <summary>
+    /// Maximum lines displayed in each log panel. Keeps UI string allocation bounded.
+    /// </summary>
+    private const int MaxDisplayLines = 500;
     // Cached compiled regex for filters
     private System.Text.RegularExpressions.Regex? _cachedUpstreamRegex;
     private string? _cachedUpstreamRegexText;
@@ -1532,7 +1531,7 @@ public partial class MainViewModel : ObservableObject
         // Stream is dead or first start — create a new connection.
         if (_logStreamService != null)
         {
-            _logStreamService.LogReceived -= OnUpstreamLogReceived;
+            _logStreamService.LogBatchReceived -= OnUpstreamLogBatchReceived;
             _logStreamService.Dispose();
             _logStreamService = null;
         }
@@ -1543,7 +1542,7 @@ public partial class MainViewModel : ObservableObject
         _logStreamService = new LogStreamService(
             new HttpClient { Timeout = TimeSpan.FromSeconds(30) },
             baseUrl);
-        _logStreamService.LogReceived += OnUpstreamLogReceived;
+        _logStreamService.LogBatchReceived += OnUpstreamLogBatchReceived;
         _logStreamCts = new CancellationTokenSource();
 
         try
@@ -1557,7 +1556,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (_logStreamService != null)
         {
-            _logStreamService.LogReceived -= OnUpstreamLogReceived;
+            _logStreamService.LogBatchReceived -= OnUpstreamLogBatchReceived;
             await _logStreamService.StopAsync();
             _logStreamService.Dispose();
             _logStreamService = null;
@@ -1567,16 +1566,25 @@ public partial class MainViewModel : ObservableObject
         _logStreamCts = null;
     }
 
-    private void OnUpstreamLogReceived(string line)
+    /// <summary>
+    /// Receives a batch of upstream log lines from the background stream task.
+    /// Posts a single UI update for the entire batch — not one per line.
+    /// </summary>
+    private void OnUpstreamLogBatchReceived(IReadOnlyList<string> batch)
     {
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            Dispatcher.UIThread.Post(() => OnUpstreamLogReceived(line));
+            Dispatcher.UIThread.Post(() => OnUpstreamLogBatchReceived(batch));
             return;
         }
 
-        _upstreamLogLines.Enqueue(line);
+        // Enqueue all lines
+        foreach (var line in batch)
+        {
+            _upstreamLogLines.Enqueue(line);
+        }
         while (_upstreamLogLines.Count > MaxLogLines) _upstreamLogLines.Dequeue();
+
         UpdateFilteredLogTexts(updateUpstream: true, updateProxy: false);
     }
 
@@ -1584,16 +1592,14 @@ public partial class MainViewModel : ObservableObject
     {
         if (updateUpstream)
         {
-            lock (_logThrottleLock)
-            {
-                if ((DateTime.UtcNow - _lastUpstreamUiUpdate).TotalMilliseconds < UiUpdateIntervalMs)
-                    return; // throttle: skip this update
-                _lastUpstreamUiUpdate = DateTime.UtcNow;
-            }
+            // Take only the last MaxDisplayLines to keep UI string allocation bounded
+            var displayLines = _upstreamLogLines.Count > MaxDisplayLines
+                ? _upstreamLogLines.Skip(_upstreamLogLines.Count - MaxDisplayLines)
+                : _upstreamLogLines;
 
             if (string.IsNullOrWhiteSpace(UpstreamLogFilterText))
             {
-                UpstreamLogText = string.Join("\n", _upstreamLogLines);
+                UpstreamLogText = string.Join("\n", displayLines);
             }
             else
             {
@@ -1601,7 +1607,7 @@ public partial class MainViewModel : ObservableObject
                 {
                     var regex = GetOrBuildRegex(ref _cachedUpstreamRegex, ref _cachedUpstreamRegexText, UpstreamLogFilterText);
                     var filtered = new List<string>();
-                    foreach (var line in _upstreamLogLines)
+                    foreach (var line in displayLines)
                     {
                         if (regex.IsMatch(line))
                             filtered.Add(line);
@@ -1610,23 +1616,21 @@ public partial class MainViewModel : ObservableObject
                 }
                 catch
                 {
-                    UpstreamLogText = string.Join("\n", _upstreamLogLines);
+                    UpstreamLogText = string.Join("\n", displayLines);
                 }
             }
         }
 
         if (updateProxy)
         {
-            lock (_logThrottleLock)
-            {
-                if ((DateTime.UtcNow - _lastSwapUiUpdate).TotalMilliseconds < UiUpdateIntervalMs)
-                    return; // throttle: skip this update
-                _lastSwapUiUpdate = DateTime.UtcNow;
-            }
+            // Take only the last MaxDisplayLines to keep UI string allocation bounded
+            var displayLines = _swapLogLines.Count > MaxDisplayLines
+                ? _swapLogLines.Skip(_swapLogLines.Count - MaxDisplayLines)
+                : _swapLogLines;
 
             if (string.IsNullOrWhiteSpace(ProxyLogFilterText))
             {
-                LlamaSwapLogText = string.Join("\n", _swapLogLines);
+                LlamaSwapLogText = string.Join("\n", displayLines);
             }
             else
             {
@@ -1634,7 +1638,7 @@ public partial class MainViewModel : ObservableObject
                 {
                     var regex = GetOrBuildRegex(ref _cachedProxyRegex, ref _cachedProxyRegexText, ProxyLogFilterText);
                     var filtered = new List<string>();
-                    foreach (var line in _swapLogLines)
+                    foreach (var line in displayLines)
                     {
                         if (regex.IsMatch(line))
                             filtered.Add(line);
@@ -1643,7 +1647,7 @@ public partial class MainViewModel : ObservableObject
                 }
                 catch
                 {
-                    LlamaSwapLogText = string.Join("\n", _swapLogLines);
+                    LlamaSwapLogText = string.Join("\n", displayLines);
                 }
             }
         }
