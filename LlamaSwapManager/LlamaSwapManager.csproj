@@ -9,6 +9,7 @@
   <ItemGroup>
      <PackageReference Include="Avalonia" Version="12.0.4" />
      <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1" />
+     <PackageReference Include="ScottPlot.Avalonia" Version="5.0.55" />
      <PackageReference Include="YamlDotNet" Version="16.1.0" />
    </ItemGroup>
 </Project>
