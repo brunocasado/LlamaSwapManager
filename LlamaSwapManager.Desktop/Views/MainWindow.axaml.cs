@@ -35,24 +35,51 @@ public partial class MainWindow : Window
     }
 
     private bool _isExiting;
+    private bool _quitInFlight;
 
     /// <summary>
-    /// Called by the VM / tray Quit path so Closing can actually shut down instead of re-hiding to tray.
+    /// Called by tray Quit / App exit paths so Closing is allowed to complete and the process ends.
     /// </summary>
     public void BeginExit()
     {
         _isExiting = true;
     }
 
-    private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    public bool IsExiting => _isExiting;
+
+    private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
-        // Tray mode: close button hides instead of exiting.
-        // Quit/Shutdown path sets _isExiting so the close is real.
+        // Already marked for shutdown (nested Closing from desktop.Shutdown()).
         if (_isExiting)
             return;
 
+        // Window X / Cmd+Win close: cancel this close, stop processes, then true exit.
         e.Cancel = true;
-        this.Hide();
+        if (_quitInFlight)
+            return;
+
+        _quitInFlight = true;
+        try
+        {
+            if (DataContext is MainViewModel vm)
+            {
+                // QuitApplicationAsync always ends with desktop.Shutdown().
+                // BeginExit() is applied in App tray path or just before that Shutdown
+                // so the re-entrant Closing is not cancelled/hidden.
+                await vm.QuitApplicationAsync();
+            }
+            else if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                BeginExit();
+                desktop.Shutdown();
+            }
+        }
+        catch
+        {
+            BeginExit();
+            if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                desktop.Shutdown();
+        }
     }
 
     private static bool IsCopyGesture(KeyEventArgs e)

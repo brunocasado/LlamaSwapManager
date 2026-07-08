@@ -27,11 +27,28 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var vm = new MainViewModel();
-             var mainWindow = new MainWindow { DataContext = vm };
-             desktop.MainWindow = mainWindow;
+            // Do not auto-exit on window close — we drive shutdown after process cleanup.
+            desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-             SetupTrayIcon(mainWindow, vm);
+            var vm = new MainViewModel();
+            var mainWindow = new MainWindow { DataContext = vm };
+            desktop.MainWindow = mainWindow;
+
+            SetupTrayIcon(mainWindow, vm);
+
+            // macOS menu Quit / Cmd+Q raises ShutdownRequested before windows close.
+            // Cancel + route through the same stop+shutdown as tray Quit / window X.
+            desktop.ShutdownRequested += async (_, e) =>
+            {
+                if (mainWindow.IsExiting)
+                    return; // already in exit path
+
+                e.Cancel = true;
+                mainWindow.BeginExit();
+                _trayIcon?.Dispose();
+                _trayIcon = null;
+                await vm.QuitApplicationAsync();
+            };
 
             // Keep menu items synced with process state
             vm.PropertyChanged += (_, e) =>

@@ -1577,7 +1577,16 @@ public partial class MainViewModel : ObservableObject
 
             if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
             {
-                // Ensure Closing handlers do not re-hide into tray.
+                // Signal window that nested Closing must complete (no re-hide to tray).
+                // Use reflection-free duck typing via dynamic only on MainWindow-like surface:
+                try
+                {
+                    var win = desktop.MainWindow;
+                    var beginExit = win?.GetType().GetMethod("BeginExit");
+                    beginExit?.Invoke(win, null);
+                }
+                catch { }
+
                 desktop.Shutdown();
             }
         }
