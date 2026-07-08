@@ -104,6 +104,19 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
             LatestVersion = latest.Version ?? "Unknown";
             CurrentVersion = await DetectCurrentVersionAsync();
 
+            // Fail closed when local version cannot be detected/parsed — do NOT treat Unknown as outdated.
+            if (string.IsNullOrWhiteSpace(CurrentVersion)
+                || CurrentVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
+                || VersionComparer.Parse(CurrentVersion) is null)
+            {
+                UpdateStatusText = "Could not detect installed version";
+                UpdateStatusColor = "#F38BA8";
+                IsUpdateAvailable = false;
+                UpdateButtonEnabled = false;
+                _logMessage?.Invoke($"Could not detect installed llama-swap version (got: {CurrentVersion}). Install dir: {InstallDirectory}");
+                return;
+            }
+
             // Use the shared VersionComparer for comparison
             var hasUpdate = VersionComparer.HasUpdate(CurrentVersion, LatestVersion);
 
@@ -157,8 +170,11 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null) return "Unknown";
 
-            var output = await proc.StandardOutput.ReadToEndAsync();
+            // Read BOTH streams (version may be on stderr) and avoid pipeline deadlock.
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
             await proc.WaitForExitAsync();
+            var output = (await stdoutTask) + (await stderrTask);
 
             // Try to extract version number from output like "version: 223 (hash)"
             var match = System.Text.RegularExpressions.Regex.Match(output, @"version:\s*(\d+)");

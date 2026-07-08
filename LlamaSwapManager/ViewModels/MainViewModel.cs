@@ -17,8 +17,6 @@ using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
 using LlamaSwapManager.Models;
 using LlamaSwapManager.Services;
-using ScottPlot;
-using ScottPlot.Plottables;
 
 namespace LlamaSwapManager.ViewModels;
 
@@ -126,20 +124,10 @@ public partial class MainViewModel : ObservableObject
         new(@"n_decoded\s*=\s*\d+\s*,\s*tg\s*=\s*([\d.]+)\s*t/s",
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    // Chart data history (rolling, max 300 points = ~10 min at 2s polling)
-    private readonly Queue<(double Timestamp, double Value)> _tpsHistory = new();
-    private readonly Queue<(double Timestamp, double Prefill, double Decode)> _tokensHistory = new();
-    private readonly Queue<(double Timestamp, int Value)> _slotsHistory = new();
-    private const int MaxHistoryPoints = 300;
-    private double _historyBaseline;
-
     // Loaded models from llama-swap /running
     [ObservableProperty]
     private ObservableCollection<LoadedModelInfo> _loadedModels = new();
 
-    // Chart plot models (ScottPlot)
-    public Plot? TokensPerSecondPlot { get; private set; }
-    public Plot? TokensSlotsPlot { get; private set; }
     // Update subsystem
     public UpdateViewModel UpdateViewModel { get; }
 
@@ -259,10 +247,6 @@ public partial class MainViewModel : ObservableObject
 
         // Detect CUDA version
         DetectCudaVersion();
-
-        // Initialize ScottPlot charts (empty)
-        TokensPerSecondPlot = new Plot();
-        TokensSlotsPlot = new Plot();
 
         Status = LlamaSwapStatus.Stopped;
         UpdateUI();
@@ -1501,50 +1485,6 @@ public partial class MainViewModel : ObservableObject
     }
 
 
-    // --- Chart data recording ---
-    private void RecordMetrics(double tps, long prefill, long decode, int slots)
-    {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        if (_historyBaseline == 0) _historyBaseline = now;
-        var t = now - _historyBaseline;
-
-        // TPS history
-        _tpsHistory.Enqueue((t, tps));
-        if (_tpsHistory.Count > MaxHistoryPoints) _tpsHistory.Dequeue();
-        var tpsData = _tpsHistory.Select(p => p.Value).ToArray();
-
-        // Tokens history (deltas — rate per second)
-        _tokensHistory.Enqueue((t, prefill, decode));
-        if (_tokensHistory.Count > MaxHistoryPoints) _tokensHistory.Dequeue();
-        var arr = _tokensHistory.ToArray();
-        var prefillRates = new double[arr.Length];
-        var decodeRates = new double[arr.Length];
-        for (int i = 0; i < arr.Length; i++)
-        {
-            var curr = arr[i];
-            var prev = i > 0 ? arr[i - 1] : curr;
-            var dt = curr.Timestamp - prev.Timestamp;
-            prefillRates[i] = dt > 0 ? (curr.Prefill - prev.Prefill) / dt : 0;
-            decodeRates[i] = dt > 0 ? (curr.Decode - prev.Decode) / dt : 0;
-        }
-
-        // Slots history
-        _slotsHistory.Enqueue((t, slots));
-        if (_slotsHistory.Count > MaxHistoryPoints) _slotsHistory.Dequeue();
-        var slotsData = _slotsHistory.Select(p => (double)p.Value).ToArray();
-
-        // Update charts — reassign entire Plot objects
-        TokensPerSecondPlot = new Plot();
-        TokensPerSecondPlot.Add.Signal(tpsData);
-        OnPropertyChanged(nameof(TokensPerSecondPlot));
-
-        TokensSlotsPlot = new Plot();
-        TokensSlotsPlot.Add.Signal(prefillRates);
-        TokensSlotsPlot.Add.Signal(decodeRates);
-        TokensSlotsPlot.Add.Signal(slotsData);
-        OnPropertyChanged(nameof(TokensSlotsPlot));
-    }
-
     private void RefreshLoadedModelsAsync()
     {
         var baseUrl = _processManager.ApiBaseUrl;
@@ -1775,10 +1715,10 @@ public partial class MainViewModel : ObservableObject
                         PrefillTokens = (long)metrics.PromptTokens;
                         DecodeTokens = (long)metrics.EvalTokens;
                         ActiveSlots = metrics.ActiveSlots;
+                        // Idle fallback only — live TPS comes from upstream print_timing logs.
+                        if (TokensPerSecond <= 0 && metrics.TokensPerSecond > 0)
+                            TokensPerSecond = metrics.TokensPerSecond;
                     });
-
-                    // Record chart data
-                    RecordMetrics(TokensPerSecond, PrefillTokens, DecodeTokens, ActiveSlots);
 
                     // Refresh loaded models
                     RefreshLoadedModelsAsync();
