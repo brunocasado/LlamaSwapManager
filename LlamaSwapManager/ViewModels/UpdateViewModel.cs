@@ -176,8 +176,9 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
             await proc.WaitForExitAsync();
             var output = (await stdoutTask) + (await stderrTask);
 
-            // Try to extract version number from output like "version: 223 (hash)"
-            var match = System.Text.RegularExpressions.Regex.Match(output, @"version:\s*(\d+)");
+            // Build prints "version: v233 (...)" (with leading v) or historically "version: 223 (...)".
+            var match = System.Text.RegularExpressions.Regex.Match(
+                output, @"version:\s*v?(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             if (match.Success)
                 return $"v{match.Groups[1].Value}";
 
