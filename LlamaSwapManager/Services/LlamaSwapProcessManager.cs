@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace LlamaSwapManager.Services;
@@ -334,35 +335,50 @@ public class LlamaSwapProcessManager : IDisposable
     }
 
 
+    /// <summary>
+    /// Collect every running llama-swap / llama-server process by name.
+    /// Orphans from previous Manager sessions must be included or Stop/Quit hang forever.
+    /// </summary>
+    private static List<Process> GetAllLlamaProcesses()
+    {
+        var map = new Dictionary<int, Process>();
+        void AddRange(IEnumerable<Process> processes)
+        {
+            foreach (var p in processes)
+            {
+                try
+                {
+                    if (!p.HasExited)
+                        map[p.Id] = p;
+                }
+                catch { /* disposed / race */ }
+            }
+        }
+
+        AddRange(Process.GetProcessesByName("llama-swap"));
+        AddRange(Process.GetProcessesByName("llama-server"));
+        return map.Values.ToList();
+    }
+
+    private void ClearManagedPids()
+    {
+        lock (_managedPids)
+        {
+            _managedPids.Clear();
+        }
+        _process = null;
+    }
+
     private async Task<bool> GracefullyStopAllLlamaProcessesAsync(string reason, int timeoutSeconds = 3)
     {
         LogMessage?.Invoke($"[manager] gracefully stopping llama processes: {reason}");
 
-        // H3: Only stop processes we actually manage
-        int[] managedPids;
-        lock (_managedPids)
-        {
-            managedPids = _managedPids.ToArray();
-        }
-
-        var processes = new List<Process>();
-        if (managedPids.Length > 0)
-        {
-            foreach (var pid in managedPids)
-            {
-                try
-                {
-                    var p = Process.GetProcessById(pid);
-                    if (!p.HasExited)
-                        processes.Add(p);
-                }
-                catch { /* Process already exited */ }
-            }
-        }
-
+        var processes = GetAllLlamaProcesses();
         if (processes.Count == 0)
         {
+            ClearManagedPids();
             ApiBaseUrl = null;
+            LlamaServerBaseUrl = null;
             SetStatus(LlamaSwapStatus.Stopped);
             return true;
         }
@@ -374,7 +390,6 @@ public class LlamaSwapProcessManager : IDisposable
                 LogMessage?.Invoke($"[manager] graceful stop pid={p.Id} name={p.ProcessName}");
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    // UseShellExecute=true avoids stdout/stderr redirect deadlock on Windows.
                     var psi = new ProcessStartInfo
                     {
                         FileName = "taskkill.exe",
@@ -385,11 +400,14 @@ public class LlamaSwapProcessManager : IDisposable
                     };
                     using var proc = Process.Start(psi);
                     if (proc is not null)
-                        await proc.WaitForExitAsync();
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        try { await proc.WaitForExitAsync(cts.Token); }
+                        catch (OperationCanceledException) { }
+                    }
                 }
                 else
                 {
-                    // SIGTERM gives llama-swap/llama-server a chance to clean up.
                     var rc = kill(p.Id, SigTerm);
                     if (rc != 0)
                         LogMessage?.Invoke($"[manager] SIGTERM failed pid={p.Id} errno={Marshal.GetLastWin32Error()}");
@@ -401,17 +419,19 @@ public class LlamaSwapProcessManager : IDisposable
             }
         }
 
-        var deadline = DateTime.Now.AddSeconds(timeoutSeconds);
-        while (DateTime.Now < deadline)
+        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
         {
-            if (!IsRunning() && await DetectApiBaseUrlAsync() is null)
+            if (!IsRunning())
             {
                 LogMessage?.Invoke("[manager] graceful stop completed");
+                ClearManagedPids();
                 ApiBaseUrl = null;
+                LlamaServerBaseUrl = null;
                 SetStatus(LlamaSwapStatus.Stopped);
                 return true;
             }
-            await Task.Delay(250);
+            await Task.Delay(200);
         }
 
         LogProcessSnapshot("still running after graceful stop");
@@ -422,46 +442,105 @@ public class LlamaSwapProcessManager : IDisposable
     {
         LogMessage?.Invoke($"[manager] killing llama processes: {reason}");
 
-        // H3: Only kill processes we manage
-        int[] managedPids;
-        lock (_managedPids)
-        {
-            managedPids = _managedPids.ToArray();
-        }
-
-        foreach (var pid in managedPids)
+        foreach (var p in GetAllLlamaProcesses())
         {
             try
             {
-                var p = Process.GetProcessById(pid);
                 if (!p.HasExited)
                 {
-                    LogMessage?.Invoke($"[manager] kill pid={pid} name={p.ProcessName}");
+                    LogMessage?.Invoke($"[manager] kill pid={p.Id} name={p.ProcessName}");
                     p.Kill(entireProcessTree: true);
                 }
             }
             catch (Exception ex)
             {
-                LogMessage?.Invoke($"[manager] kill failed pid={pid}: {ex.Message}");
+                LogMessage?.Invoke($"[manager] kill failed pid={p.Id}: {ex.Message}");
             }
         }
 
-        var deadline = DateTime.Now.AddSeconds(8);
-        while (DateTime.Now < deadline)
+        // Final OS-native name sweep for stubborn trees / orphans.
+        try
         {
-            if (!IsRunning() && await DetectApiBaseUrlAsync() is null)
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                foreach (var p in GetAllLlamaProcesses())
+                {
+                    try
+                    {
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = "taskkill.exe",
+                            Arguments = $"/F /T /PID {p.Id}",
+                            UseShellExecute = true,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden
+                        };
+                        using var proc = Process.Start(psi);
+                        if (proc is not null)
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                            try { await proc.WaitForExitAsync(cts.Token); } catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            else
+            {
+                foreach (var name in new[] { "llama-swap", "llama-server" })
+                {
+                    try
+                    {
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = "/usr/bin/pkill",
+                            Arguments = $"-9 -x {name}",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            RedirectStandardError = true,
+                            RedirectStandardOutput = true
+                        };
+                        using var proc = Process.Start(psi);
+                        if (proc is not null)
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                            try { await proc.WaitForExitAsync(cts.Token); } catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[manager] final sweep error: {ex.Message}");
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!IsRunning())
             {
                 LogMessage?.Invoke("[manager] all llama processes stopped");
+                ClearManagedPids();
                 ApiBaseUrl = null;
+                LlamaServerBaseUrl = null;
                 SetStatus(LlamaSwapStatus.Stopped);
                 return true;
             }
-            await Task.Delay(250);
+            await Task.Delay(200);
         }
 
         LogProcessSnapshot("still running after kill");
-        return !IsRunning() && (await DetectApiBaseUrlAsync()) is null;
+        var done = !IsRunning();
+        ClearManagedPids();
+        ApiBaseUrl = null;
+        LlamaServerBaseUrl = null;
+        if (done)
+            SetStatus(LlamaSwapStatus.Stopped);
+        return done;
     }
+
     public async Task<bool> StopAsync()
     {
         LogProcessSnapshot("stop requested");
@@ -470,21 +549,63 @@ public class LlamaSwapProcessManager : IDisposable
 
         try
         {
-            await TryUnloadModelAsync();
-            var stopped = await GracefullyStopAllLlamaProcessesAsync("stop");
+            try
+            {
+                await TryUnloadModelAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            catch (TimeoutException)
+            {
+                LogMessage?.Invoke("[manager] unload budget exceeded — forcing stop");
+            }
+            catch (OperationCanceledException)
+            {
+                LogMessage?.Invoke("[manager] unload cancelled — forcing stop");
+            }
+
+            var stopped = await GracefullyStopAllLlamaProcessesAsync("stop", timeoutSeconds: 3);
             if (!stopped)
                 stopped = await KillAllLlamaProcessesAsync("stop fallback");
-            SetStatus(stopped ? LlamaSwapStatus.Stopped : LlamaSwapStatus.Error);
+
+            // Always leave a terminal state so Start/Stop/Restart buttons unstick.
+            ClearManagedPids();
             ApiBaseUrl = null;
-            _process = null;
+            LlamaServerBaseUrl = null;
+            SetStatus(stopped ? LlamaSwapStatus.Stopped : LlamaSwapStatus.Error);
             LogProcessSnapshot(stopped ? "stop completed" : "stop failed");
             return stopped;
         }
         catch (Exception ex)
         {
+            ClearManagedPids();
+            ApiBaseUrl = null;
+            LlamaServerBaseUrl = null;
             SetStatus(LlamaSwapStatus.Error);
             LogMessage?.Invoke($"[manager] error stopping: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous hard-stop used by Quit. Always enumerates by process name and
+    /// never waits on managed-PID-only bookkeeping.
+    /// </summary>
+    public async Task ForceStopForQuitAsync()
+    {
+        LogMessage?.Invoke("[manager] force stop for quit");
+        try
+        {
+            await KillAllLlamaProcessesAsync("quit force");
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[manager] force stop for quit failed: {ex.Message}");
+        }
+        finally
+        {
+            ClearManagedPids();
+            ApiBaseUrl = null;
+            LlamaServerBaseUrl = null;
+            SetStatus(LlamaSwapStatus.Stopped);
         }
     }
 
@@ -492,17 +613,22 @@ public class LlamaSwapProcessManager : IDisposable
     {
         LogMessage?.Invoke("[manager] restart requested");
         LogProcessSnapshot("before restart");
-        await TryUnloadModelAsync();
-        var stopped = await GracefullyStopAllLlamaProcessesAsync("restart");
-        if (!stopped)
-            stopped = await KillAllLlamaProcessesAsync("restart fallback");
-        if (!stopped)
+
+        var stopped = await StopAsync();
+        if (!stopped && IsRunning())
+        {
+            LogMessage?.Invoke("[manager] restart: first stop incomplete — force killing");
+            stopped = await KillAllLlamaProcessesAsync("restart force");
+        }
+
+        if (IsRunning())
         {
             LogMessage?.Invoke("[manager] restart aborted: could not stop existing processes");
             SetStatus(LlamaSwapStatus.Error);
             return false;
         }
-        await Task.Delay(800);
+
+        await Task.Delay(400);
         ResolvePaths();
         return await StartAsync();
     }
@@ -536,16 +662,21 @@ public class LlamaSwapProcessManager : IDisposable
 
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
             LogMessage?.Invoke($"[manager] unloading model via {baseUrl}/api/models/unload");
-            var response = await http.PostAsync($"{baseUrl}/api/models/unload", null);
+            var response = await http.PostAsync($"{baseUrl}/api/models/unload", null, cts.Token);
             LogMessage?.Invoke($"[manager] unload response: {(int)response.StatusCode} {response.StatusCode}");
-            if (response.IsSuccessStatusCode)
-                await Task.Delay(500);
-            else
-                await Task.Delay(200);
+            await Task.Delay(response.IsSuccessStatusCode ? 300 : 100, cts.Token);
         }
-        catch { }
+        catch (OperationCanceledException)
+        {
+            LogMessage?.Invoke("[manager] unload timed out — continuing stop");
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[manager] unload failed: {ex.Message}");
+        }
     }
 
     private async Task KillProcessTreeAsync()

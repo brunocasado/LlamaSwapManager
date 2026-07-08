@@ -473,21 +473,34 @@ public partial class MainViewModel : ObservableObject
 
     private void UpdateUI()
     {
-        if (_processManager.DetectedApiBaseUrl is not null || _processManager.IsLlamaSwapProcessRunning())
+        // Prefer live process/API truth, but never collapse in-flight Starting/Stopping mid-command.
+        var processRunning = _processManager.IsLlamaSwapProcessRunning();
+        var apiUp = _processManager.DetectedApiBaseUrl is not null;
+
+        if (Status is not (LlamaSwapStatus.Starting or LlamaSwapStatus.Stopping))
         {
-            Status = LlamaSwapStatus.Running;
+            if (apiUp || processRunning)
+                Status = LlamaSwapStatus.Running;
+            else if (Status is LlamaSwapStatus.Running or LlamaSwapStatus.Error)
+                Status = LlamaSwapStatus.Stopped;
         }
-        else if (Status == LlamaSwapStatus.Error || Status == LlamaSwapStatus.Running || Status == LlamaSwapStatus.Stopping)
+        else
         {
-            Status = LlamaSwapStatus.Stopped;
+            // While busy, if the actual desired end-state is already observable, promote it.
+            if (Status == LlamaSwapStatus.Starting && (apiUp || processRunning))
+                Status = LlamaSwapStatus.Running;
+            else if (Status == LlamaSwapStatus.Stopping && !apiUp && !processRunning && !_processManager.IsRunning())
+                Status = LlamaSwapStatus.Stopped;
         }
 
         StatusText = _processManager.DetectedApiBaseUrl is not null
             ? $"Status: running ({_processManager.DetectedApiBaseUrl})"
             : $"Status: {Status.ToString().ToLower()}";
+
+        // Buttons follow terminal process state; Starting/Stopping still show busy for feedback.
         IsBusy = Status is LlamaSwapStatus.Starting or LlamaSwapStatus.Stopping;
         StartButtonEnabled = Status != LlamaSwapStatus.Running && !IsBusy;
-        StopButtonEnabled = Status == LlamaSwapStatus.Running && !IsBusy;
+        StopButtonEnabled = (Status == LlamaSwapStatus.Running || processRunning || apiUp) && !IsBusy;
         RestartButtonEnabled = !IsBusy;
 
         switch (Status)
@@ -518,67 +531,120 @@ public partial class MainViewModel : ObservableObject
     // --- Commands ---
     private async Task ExecuteStartAsync()
     {
-        try
-        {
-            IsBusy = true; StartButtonEnabled = false; StopButtonEnabled = false; RestartButtonEnabled = false; StatusText = "Status: starting...";
-            var ok = await Task.Run(async () => await _processManager.StartAsync());
-            OnLogMessage($"[ui] start result: {ok}");
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Error: {ex.Message}";
-        }
-        IsBusy = false;
-        await RefreshRuntimeStateAsync();
+        await RunLifecycleCommandAsync(
+            busyText: "Status: starting...",
+            action: () => _processManager.StartAsync(),
+            resultLabel: "start");
     }
 
     private async Task ExecuteStopAsync()
     {
-        try
-        {
-            IsBusy = true; StartButtonEnabled = false; StopButtonEnabled = false; RestartButtonEnabled = false; StatusText = "Status: stopping...";
-            var ok = await Task.Run(async () => await _processManager.StopAsync());
-            OnLogMessage($"[ui] stop result: {ok}");
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Error: {ex.Message}";
-        }
-        IsBusy = false;
-        await RefreshRuntimeStateAsync();
+        await RunLifecycleCommandAsync(
+            busyText: "Status: stopping...",
+            action: () => _processManager.StopAsync(),
+            resultLabel: "stop");
     }
 
     private async Task ExecuteRestartAsync()
     {
+        await RunLifecycleCommandAsync(
+            busyText: "Status: restarting...",
+            action: () => _processManager.RestartAsync(),
+            resultLabel: "restart");
+    }
+
+    /// <summary>
+    /// Shared Start/Stop/Restart plumbing: always leaves IsBusy=false and rebuilds button state,
+    /// with a hard timeout so hung process I/O cannot freeze the UI forever.
+    /// </summary>
+    private async Task RunLifecycleCommandAsync(string busyText, Func<Task<bool>> action, string resultLabel)
+    {
+        IsBusy = true;
+        StartButtonEnabled = false;
+        StopButtonEnabled = false;
+        RestartButtonEnabled = false;
+        StatusText = busyText;
+
         try
         {
-            IsBusy = true; StartButtonEnabled = false; StopButtonEnabled = false; RestartButtonEnabled = false; StatusText = "Status: restarting...";
-            var ok = await Task.Run(async () => await _processManager.RestartAsync());
-            OnLogMessage($"[ui] restart result: {ok}");
+            // 20s ceiling covers unload + graceful + force kill; never block buttons forever.
+            var ok = await Task.Run(async () =>
+            {
+                try
+                {
+                    return await action().WaitAsync(TimeSpan.FromSeconds(20));
+                }
+                catch (TimeoutException)
+                {
+                    OnLogMessage($"[ui] {resultLabel} timed out after 20s");
+                    return false;
+                }
+            });
+            OnLogMessage($"[ui] {resultLabel} result: {ok}");
         }
         catch (Exception ex)
         {
             StatusText = $"Error: {ex.Message}";
+            OnLogMessage($"[ui] {resultLabel} error: {ex.Message}");
         }
-        IsBusy = false;
-        await RefreshRuntimeStateAsync();
+        finally
+        {
+            IsBusy = false;
+            try
+            {
+                await RefreshRuntimeStateAsync();
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"[ui] refresh after {resultLabel} failed: {ex.Message}");
+                // Force terminal UI state even if detection hangs.
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IsBusy = false;
+                    Status = LlamaSwapStatus.Error;
+                    StatusText = $"Status: error after {resultLabel}";
+                    StartButtonEnabled = true;
+                    StopButtonEnabled = false;
+                    RestartButtonEnabled = true;
+                });
+            }
+        }
     }
 
     private async Task RefreshRuntimeStateAsync()
     {
-        await Task.Run(() =>
+        try
         {
-            _processManager.RefreshPaths();
-        });
+            await Task.Run(() => _processManager.RefreshPaths()).WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        catch { /* path refresh is best-effort */ }
 
-        // Await detection so the URL is resolved before UI update.
-        var apiBaseUrl = await _processManager.DetectApiBaseUrlAsync();
-        if (apiBaseUrl != null)
-            _processManager.ApiBaseUrl = apiBaseUrl;
+        // Bound detection so outer finally of lifecycle commands can always finish.
+        try
+        {
+            var apiBaseUrl = await _processManager.DetectApiBaseUrlAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            if (apiBaseUrl != null)
+                _processManager.ApiBaseUrl = apiBaseUrl;
+            else
+                _processManager.ApiBaseUrl = null;
+        }
+        catch
+        {
+            _processManager.ApiBaseUrl = null;
+        }
 
-        var llamaServerUrl = await _processManager.DetectLlamaServerBaseUrlAsync();
-        if (llamaServerUrl != null)
-            _processManager.LlamaServerBaseUrl = llamaServerUrl;
+        try
+        {
+            var llamaServerUrl = await _processManager.DetectLlamaServerBaseUrlAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            if (llamaServerUrl != null)
+                _processManager.LlamaServerBaseUrl = llamaServerUrl;
+            else
+                _processManager.LlamaServerBaseUrl = null;
+        }
+        catch
+        {
+            _processManager.LlamaServerBaseUrl = null;
+        }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -1467,20 +1533,53 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Gracefully stops the llama-swap process and shuts down the application.
-    /// Called from the Tray "Quit" menu.
+    /// Best-effort stop then forced application exit. Never hangs the Quit button:
+    /// stop is budgeted, and Shutdown always runs.
     /// </summary>
     public async Task QuitApplicationAsync()
     {
-        if (_processManager.Status == LlamaSwapStatus.Running || _processManager.Status == LlamaSwapStatus.Starting)
+        OnLogMessage("[ui] quit requested");
+        try
         {
-            await ExecuteStopAsync();
-            await Task.Delay(1500); // Give it a moment to shut down gracefully
+            // Always try stop when any llama process exists, not only when enum says Running.
+            if (_processManager.IsRunning()
+                || _processManager.Status is LlamaSwapStatus.Running or LlamaSwapStatus.Starting or LlamaSwapStatus.Stopping)
+            {
+                try
+                {
+                    await ExecuteStopAsync().WaitAsync(TimeSpan.FromSeconds(12));
+                }
+                catch (TimeoutException)
+                {
+                    OnLogMessage("[ui] quit: stop timed out — force killing processes");
+                    try { await _processManager.ForceStopForQuitAsync(); } catch { }
+                }
+            }
+            else
+            {
+                // Still clear orphans that may exist without matching Status enum.
+                try { await _processManager.ForceStopForQuitAsync(); } catch { }
+            }
         }
-        
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        catch (Exception ex)
         {
-            desktop.Shutdown();
+            OnLogMessage($"[ui] quit stop path error: {ex.Message}");
+            try { await _processManager.ForceStopForQuitAsync(); } catch { }
+        }
+        finally
+        {
+            try
+            {
+                StopMetricsPolling();
+                await StopLogStreamingAsync().WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            catch { }
+
+            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                // Ensure Closing handlers do not re-hide into tray.
+                desktop.Shutdown();
+            }
         }
     }
 

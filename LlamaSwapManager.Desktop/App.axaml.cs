@@ -45,7 +45,7 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private void SetupTrayIcon(Window mainWindow, MainViewModel vm)
+    private void SetupTrayIcon(MainWindow mainWindow, MainViewModel vm)
      {
          try
          {
@@ -99,6 +99,10 @@ public partial class App : Application
             {
                 Command = new AsyncRelayCommand(async () =>
                 {
+                    // Permit real shutdown (window Closing otherwise only hides to tray).
+                    mainWindow.BeginExit();
+                    _trayIcon?.Dispose();
+                    _trayIcon = null;
                     await vm.QuitApplicationAsync();
                 })
             };
@@ -134,7 +138,7 @@ public partial class App : Application
         }
     }
 
-    private static void ShowWindow(Window mainWindow)
+    private static void ShowWindow(MainWindow mainWindow)
     {
         mainWindow.Show();
         mainWindow.WindowState = WindowState.Normal;

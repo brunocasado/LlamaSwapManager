@@ -34,10 +34,23 @@ public partial class MainWindow : Window
         DataContextChanged += OnDataContextChanged;
     }
 
+    private bool _isExiting;
+
+    /// <summary>
+    /// Called by the VM / tray Quit path so Closing can actually shut down instead of re-hiding to tray.
+    /// </summary>
+    public void BeginExit()
+    {
+        _isExiting = true;
+    }
+
     private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
-        // Prevent the application from closing; just hide the window.
-        // The user can quit via the Tray icon menu.
+        // Tray mode: close button hides instead of exiting.
+        // Quit/Shutdown path sets _isExiting so the close is real.
+        if (_isExiting)
+            return;
+
         e.Cancel = true;
         this.Hide();
     }
