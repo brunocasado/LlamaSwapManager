@@ -154,12 +154,12 @@
                             PointerReleased="OnModelItemClick"
                             Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}">
                       <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
                         <Button Grid.Row="0" Grid.Column="1" Content="Clone" Classes="ghost" Padding="8,3" FontSize="11"
                                 ToolTip.Tip="Clone for parameter experiments"
                                 PointerPressed="OnCloneModelPointerPressed" Click="OnCloneModelClick"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Name}" FontSize="12" Foreground="#A6ADC8" Margin="0,6,0,0"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CmdPreview}" FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" MaxHeight="48" TextTrimming="CharacterEllipsis" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CmdPreview}" FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" MaxHeight="48"  Margin="0,8,0,0"/>
                         <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,12,0,0">
                           <Border Classes="pill"><TextBlock Text="{Binding Ttl, StringFormat=TTL {0}}" FontSize="10" Foreground="#89B4FA"/></Border>
                           <Border Classes="pill" IsVisible="{Binding UseJinja}"><TextBlock Text="jinja" FontSize="10" Foreground="#A6E3A1"/></Border>
@@ -261,7 +261,7 @@
                           <DataTemplate x:DataType="vm:EvictCostItem">
                             <Grid ColumnDefinitions="80,*,190,110" ColumnSpacing="12" Margin="0,4">
                               <TextBlock Grid.Column="0" Text="{Binding Key}" Foreground="#89B4FA" FontWeight="Bold" VerticalAlignment="Center" />
-                              <TextBlock Grid.Column="1" Text="{Binding ModelId}" Foreground="#CDD6F4" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="1" Text="{Binding ModelId}" Foreground="#CDD6F4"  VerticalAlignment="Center" />
                               <ComboBox Grid.Column="2" ItemsSource="{Binding PriorityOptions}" SelectedItem="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" />
                               <TextBox Grid.Column="3"
                                        Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
@@ -752,7 +752,8 @@
     </Border>
   
     
-    <!-- FULL-WINDOW MODEL EDITOR: centered ~90% via margins -->
+    
+    <!-- FULL-WINDOW MODEL EDITOR: centered form column, proportional * fields, label-above -->
     <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Grid.RowSpan="2"
           IsVisible="{Binding HasSelectedModel}" ZIndex="200">
       <Border Background="#C0000000" PointerPressed="OnModelEditorBackdropPressed"/>
@@ -866,149 +867,187 @@
             </Border>
             <Panel Grid.Column="1" Background="#101018">
                 <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=essentials}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Essentials" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Common knobs for every model profile." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
-
-                      <StackPanel Spacing="16">
-                        <Grid ColumnDefinitions="128,240,16,128,240" RowSpacing="10">
-                          <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                          </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Model ID" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ModelId}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="0" Grid.Column="3" Text="Display name" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding SelectedModel.Name}" MinHeight="32" HorizontalAlignment="Stretch"/>
-
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Context" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.ContextSize}" PlaceholderText="0 = default" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="3" Text="GPU layers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="1" Grid.Column="4" ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" IsEditable="True" MinHeight="32" HorizontalAlignment="Stretch"/>
-
-                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Reasoning" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="2" Grid.Column="3" Text="TTL (s)" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="2" Grid.Column="4" Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        </Grid>
-
-                        <Grid ColumnDefinitions="128,480" RowSpacing="10">
-                          <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto"/>
-                          </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Model source" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <TextBox Grid.Column="0" Text="{Binding SelectedModelSourceLabel}" IsReadOnly="True" MinHeight="32"/>
-                            <Button Grid.Column="1" Content="Choose" Click="OnChooseModelClick" Classes="ghost" Padding="14,6" MinHeight="32"/>
-                          </Grid>
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Server path" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.LlamaServerPath}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="16" Margin="0,4,0,0">
-                            <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="jinja" Foreground="#CDD6F4"/>
-                            <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="fit on" Foreground="#CDD6F4"/>
-                            <CheckBox IsChecked="{Binding SelectedModel.NoMmap}" Content="no-mmap" Foreground="#CDD6F4"/>
-                          </StackPanel>
-                        </Grid>
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Essentials" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Common knobs for every model profile." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
                       </StackPanel>
-
-                    </Border>
-                  </StackPanel>
-                </ScrollViewer>
-                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=identity}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Identity" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Names, aliases and network bind." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
-
-                      <Grid ColumnDefinitions="128,480" RowSpacing="10">
-                        <Grid.RowDefinitions>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Description" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Description}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Aliases" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.AliasesText}" PlaceholderText="comma-separated" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Host" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.Host}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Port" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedModel.Port}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                      </Grid>
-
-                    </Border>
-                  </StackPanel>
-                </ScrollViewer>
-                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=runtime}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Runtime" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Prediction length and CPU batching." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
-
-                      <Grid ColumnDefinitions="128,240,16,128,240" RowSpacing="10">
-                        <Grid.RowDefinitions>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Predict" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Predict}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="0" Grid.Column="3" Text="Threads" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding SelectedModel.Threads}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Threads batch" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.ThreadsBatch}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="1" Grid.Column="3" Text="Batch size" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="1" Grid.Column="4" Text="{Binding SelectedModel.BatchSize}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="uBatch" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.UBatchSize}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                      </Grid>
-
-                    </Border>
-                  </StackPanel>
-                </ScrollViewer>
-                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=gpu}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="GPU and memory" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Device placement and memory behavior." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
+                      <Border Classes="card" Padding="16">
 
                       <StackPanel Spacing="14">
-                        <Grid ColumnDefinitions="128,240,16,128,240" RowSpacing="10">
-                          <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                          </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="GPU layers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" IsEditable="True" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="0" Grid.Column="3" Text="Flash attn" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="0" Grid.Column="4" ItemsSource="{Binding AutoOnOffOptions}" SelectedItem="{Binding SelectedModel.FlashAttention}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Device" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.Device}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="3" Text="Split mode" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="1" Grid.Column="4" ItemsSource="{Binding SplitModeOptions}" SelectedItem="{Binding SelectedModel.SplitMode}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Tensor split" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.TensorSplit}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="2" Grid.Column="3" Text="Main GPU" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="2" Grid.Column="4" Text="{Binding SelectedModel.MainGpu}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Model ID" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.ModelId}" PlaceholderText="qwen2.5-14b" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Display name" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Name}" PlaceholderText="Friendly label" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Context" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.ContextSize}" PlaceholderText="0 = default" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="GPU layers" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" IsEditable="True" PlaceholderText="auto | all | N" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Reasoning" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="TTL (s)" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Model source" FontSize="12" Foreground="#A6ADC8"/>
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Text="{Binding SelectedModelSourceLabel}" IsReadOnly="True" MinHeight="34"
+                                     />
+                            <Button Grid.Column="1" Content="Choose" Click="OnChooseModelClick" Classes="ghost"
+                                    Padding="14,6" MinHeight="34" VerticalAlignment="Center"/>
+                          </Grid>
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Server path" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.LlamaServerPath}" PlaceholderText="/path/to/llama-server" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,2,0,0">
+                          <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="jinja" Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="fit on" Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.NoMmap}" Content="no-mmap" Foreground="#CDD6F4"/>
+                        </StackPanel>
+                      </StackPanel>
+
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=identity}"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Identity" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Names, aliases and network bind." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
+
+                      <StackPanel Spacing="14">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Description" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Description}" PlaceholderText="Optional" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Aliases" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.AliasesText}" PlaceholderText="comma-separated" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Host" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Host}" PlaceholderText="127.0.0.1" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Port" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Port}" PlaceholderText="${{PORT}}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      </StackPanel>
+
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=runtime}"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Runtime" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Prediction length and CPU batching." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
+
+                      <StackPanel Spacing="14">
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Predict" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Predict}" PlaceholderText="-1" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Threads" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Threads}" PlaceholderText="-1" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Threads batch" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.ThreadsBatch}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Batch size" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.BatchSize}" PlaceholderText="2048" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="uBatch" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.UBatchSize}" PlaceholderText="512" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </StackPanel>
+
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=gpu}"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="GPU and memory" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Device placement and memory behavior." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
+
+                      <StackPanel Spacing="14">
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="GPU layers" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" IsEditable="True" PlaceholderText="auto | all | N" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Flash attn" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding AutoOnOffOptions}" SelectedItem="{Binding SelectedModel.FlashAttention}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Device" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Device}" PlaceholderText="CUDA0,Metal" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Split mode" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding SplitModeOptions}" SelectedItem="{Binding SelectedModel.SplitMode}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Tensor split" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.TensorSplit}" PlaceholderText="3,1" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Main GPU" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.MainGpu}" PlaceholderText="0" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="16">
                           <CheckBox IsChecked="{Binding SelectedModel.Mlock}" Content="mlock" Foreground="#CDD6F4"/>
                           <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="fit on" Foreground="#CDD6F4"/>
@@ -1016,93 +1055,119 @@
                         </StackPanel>
                       </StackPanel>
 
-                    </Border>
-                  </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </Border>
                 </ScrollViewer>
                 <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=kv}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="KV cache" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Key/value cache datatypes." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
-
-                      <Grid ColumnDefinitions="128,240,16,128,240" RowSpacing="10">
-                        <Grid.RowDefinitions>
-                          <RowDefinition Height="Auto" MinHeight="34"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Cache K" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeK}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        <TextBlock Grid.Row="0" Grid.Column="3" Text="Cache V" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <ComboBox Grid.Row="0" Grid.Column="4" ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeV}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                      </Grid>
-
-                    </Border>
-                  </StackPanel>
-                </ScrollViewer>
-                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=sampling}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Sampling" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Generation style controls." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="KV cache" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Key/value cache datatypes." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
 
                       <StackPanel Spacing="14">
-                        <Grid ColumnDefinitions="128,240,16,128,240" RowSpacing="10">
-                          <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                          </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Temperature" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Temperature}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="0" Grid.Column="3" Text="Top K" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding SelectedModel.TopK}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Top P" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.TopP}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="3" Text="Min P" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="4" Text="{Binding SelectedModel.MinP}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Repeat penalty" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.RepeatPenalty}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="2" Grid.Column="3" Text="Seed" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="2" Grid.Column="4" Text="{Binding SelectedModel.Seed}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        </Grid>
-                        <Grid ColumnDefinitions="128,480">
-                          <TextBlock Grid.Column="0" Text="Samplers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Column="1" ItemsSource="{Binding CommonSamplersOptions}" SelectedItem="{Binding SelectedModel.Samplers}" IsEditable="True" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Cache K" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeK}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Cache V" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding CacheTypeOptions}" SelectedItem="{Binding SelectedModel.CacheTypeV}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
                       </StackPanel>
 
-                    </Border>
-                  </StackPanel>
-                </ScrollViewer>
-                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=server}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Server and API" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Slots, auth and endpoint toggles." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </Border>
                     </StackPanel>
-                    <Border Classes="card" Padding="14">
+                  </Border>
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=sampling}"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Sampling" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Generation style controls." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
 
                       <StackPanel Spacing="14">
-                        <Grid ColumnDefinitions="128,240,16,128,240" RowSpacing="10">
-                          <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                          </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Parallel" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Parallel}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="0" Grid.Column="3" Text="Timeout" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding SelectedModel.Timeout}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="HTTP threads" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.ThreadsHttp}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="3" Text="API key" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="1" Grid.Column="4" Text="{Binding SelectedModel.ApiKey}" PasswordChar="*" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Temperature" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Temperature}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Top K" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.TopK}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Top P" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.TopP}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Min P" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.MinP}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Repeat penalty" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.RepeatPenalty}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Seed" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Seed}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Samplers" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding CommonSamplersOptions}" SelectedItem="{Binding SelectedModel.Samplers}" IsEditable="True" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </StackPanel>
+
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=server}"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Server and API" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Slots, auth and endpoint toggles." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
+
+                      <StackPanel Spacing="14">
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Parallel" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Parallel}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Timeout" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.Timeout}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="HTTP threads" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.ThreadsHttp}" PlaceholderText="" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="API key" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.ApiKey}" PasswordChar="*" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="14">
                           <CheckBox IsChecked="{Binding SelectedModel.ContBatching}" Content="continuous batching" Foreground="#CDD6F4"/>
                           <CheckBox IsChecked="{Binding SelectedModel.Slots}" Content="slots" Foreground="#CDD6F4"/>
@@ -1112,50 +1177,57 @@
                         </StackPanel>
                       </StackPanel>
 
-                    </Border>
-                  </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </Border>
                 </ScrollViewer>
                 <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=chat}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Chat" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Templates and reasoning behavior." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Chat" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Templates and reasoning behavior." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
 
                       <StackPanel Spacing="14">
-                        <Grid ColumnDefinitions="128,480" RowSpacing="10">
-                          <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                            <RowDefinition Height="Auto" MinHeight="34"/>
-                          </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Chat template" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding ChatTemplatePresets}" SelectedItem="{Binding SelectedModel.ChatTemplate}" IsEditable="True" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Reasoning" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Reasoning format" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReasoningFormatOptions}" SelectedItem="{Binding SelectedModel.ReasoningFormat}" MinHeight="32" HorizontalAlignment="Stretch"/>
-                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Reasoning budget" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                          <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedModel.ReasoningBudget}" PlaceholderText="-1 / 0 / N" MinHeight="32" HorizontalAlignment="Stretch"/>
-                        </Grid>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Chat template" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding ChatTemplatePresets}" SelectedItem="{Binding SelectedModel.ChatTemplate}" IsEditable="True" PlaceholderText="chatml | path.jinja" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      <Grid ColumnDefinitions="*,16,*">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Reasoning" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="6">
+                          <TextBlock Text="Reasoning format" FontSize="12" Foreground="#A6ADC8"/>
+                          <ComboBox ItemsSource="{Binding ReasoningFormatOptions}" SelectedItem="{Binding SelectedModel.ReasoningFormat}" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                      </Grid>
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Reasoning budget" FontSize="12" Foreground="#A6ADC8"/>
+                          <TextBox Text="{Binding SelectedModel.ReasoningBudget}" PlaceholderText="-1 / 0 / N" MinHeight="34" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
                         <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="Enable jinja" Foreground="#CDD6F4"/>
-                        <TextBlock Text="Template: built-in name, path to .jinja, or raw Jinja. Empty = model default." FontSize="11" Foreground="#6C7086" TextWrapping="Wrap"/>
+                        <TextBlock Text="Template: built-in name, path to .jinja, or raw Jinja. Empty uses the model default."
+                                   FontSize="11" Foreground="#6C7086" TextWrapping="Wrap"/>
                       </StackPanel>
 
-                    </Border>
-                  </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </Border>
                 </ScrollViewer>
                 <ScrollViewer IsVisible="{Binding ModelEditorSection, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=raw}"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,18">
-                  <StackPanel Spacing="12" Margin="0,0,8,20" MaxWidth="760" HorizontalAlignment="Left">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Raw flags" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                      <TextBlock Text="Escape hatch for unsupported flags." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border Classes="card" Padding="14">
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <Border Padding="28,22">
+                    <StackPanel Spacing="12" MaxWidth="720" HorizontalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Raw flags" FontSize="18" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        <TextBlock Text="Escape hatch for unsupported flags." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+                      </StackPanel>
+                      <Border Classes="card" Padding="16">
 
                       <StackPanel Spacing="12">
                         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
@@ -1163,20 +1235,22 @@
                           <Button Grid.Column="1" Content="Copy" Click="OnCopyExtraArgsClick" Classes="ghost" Padding="10,5"/>
                           <Button Grid.Column="2" Content="Paste" Click="OnPasteExtraArgsClick" Classes="ghost" Padding="10,5"/>
                         </Grid>
-                        <TextBox Name="ExtraArgsTextBox" Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True" MinHeight="200" TextWrapping="Wrap"
+                        <TextBox Name="ExtraArgsTextBox" Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True"
+                                 MinHeight="200" TextWrapping="Wrap"
                                  KeyDown="OnExtraArgsKeyDown" GotFocus="OnExtraArgsGotFocus"
                                  PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf"/>
                       </StackPanel>
 
-                    </Border>
-                  </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </Border>
                 </ScrollViewer>
             </Panel>
           </Grid>
 
           <Border Grid.Row="2" Padding="18,14" Background="#0C0C14" BorderBrush="#1A1A28" BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
-              <TextBlock Text="Centered overlay with ~90% of the window. Section rail switches pages."
+              <TextBlock Text="Centered form column (max 720). Label-above fields with proportional width — no fixed-px overflow."
                          FontSize="11" Foreground="#6C7086" VerticalAlignment="Center" TextWrapping="Wrap"/>
               <Button Grid.Column="1" Content="Save" Command="{Binding SaveModelCommand}" Classes="success" Padding="18,9" MinWidth="120"/>
               <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelModelCommand}" Classes="ghost" Padding="18,9" MinWidth="110" IsVisible="{Binding IsNewModel}"/>
@@ -1186,6 +1260,7 @@
         </Grid>
       </Border>
     </Grid>
+
 
 
   </Grid>
