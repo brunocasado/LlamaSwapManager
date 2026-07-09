@@ -164,10 +164,6 @@
                   <DataTemplate x:DataType="vm:ModelEditItem">
                     <Border Width="300" Classes="card model-card" Margin="8" Cursor="Hand"
                             Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}"
-                            DragDrop.AllowDrop="True"
-                            DragDrop.DragOver="OnModelCardDragOver"
-                            DragDrop.DragLeave="OnModelCardDragLeave"
-                            DragDrop.Drop="OnModelCardDrop"
                             PointerPressed="OnModelCardPointerPressed"
                             PointerMoved="OnModelCardPointerMoved"
                             PointerReleased="OnModelCardPointerReleased"
@@ -768,6 +764,10 @@
     
     
     
+    <!-- DRAG GHOST (model reorder) -->
+    <Canvas x:Name="PART_DragGhostLayer" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Grid.RowSpan="2"
+            IsHitTestVisible="False" IsVisible="False" ZIndex="450"/>
+
     <!-- TOAST -->
     <Border x:Name="PART_Toast" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Grid.RowSpan="2"
             IsVisible="False" ZIndex="400" HorizontalAlignment="Center" VerticalAlignment="Bottom"

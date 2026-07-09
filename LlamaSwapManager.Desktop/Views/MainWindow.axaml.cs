@@ -44,6 +44,12 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _toastCts;
 
     private Border? _modelDropHighlight;
+    private Point? _reorderPressPoint;
+    private ModelEditItem? _reorderModel;
+    private Border? _reorderSourceBorder;
+    private bool _reorderDragging;
+    private Border? _reorderGhostBorder;
+    private Point _reorderPressInCard;
 
     /// <summary>
     /// Tray Quit / Cmd+Q path: allows Closing to complete so the process can shut down.
@@ -340,75 +346,189 @@ public partial class MainWindow : Window
 
 
     
-    // ── Model card drag-reorder (in-process payload + ghost card) ─────────
+    
+    // ── Model card reorder (custom pointer drag; no OS DnD — macOS crash safe) ─
 
-    private static readonly DataFormat<string> ModelIdFormat =
-        DataFormat.CreateInProcessFormat<string>("llamaswap-model-id");
-
-    private Border? _modelDragSource;
-
-    private async void OnModelCardPointerPressed(object? sender, PointerPressedEventArgs e)
+    private void OnModelCardPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not Border border || border.DataContext is not ModelEditItem model)
             return;
-        // Don't drag when interacting with buttons (Clone).
         if (e.Source is Button || (e.Source as Control)?.FindAncestorOfType<Button>() is not null)
             return;
         if (!e.GetCurrentPoint(border).Properties.IsLeftButtonPressed)
             return;
 
-        var id = model.ModelId ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(id))
+        _reorderPressPoint = e.GetPosition(this);
+        _reorderPressInCard = e.GetPosition(border);
+        _reorderModel = model;
+        _reorderSourceBorder = border;
+        _reorderDragging = false;
+        e.Pointer.Capture(border);
+        e.Handled = true;
+    }
+
+    private void OnModelCardPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_reorderPressPoint is null || _reorderModel is null || _reorderSourceBorder is null)
+            return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
 
-        // Ghost: fade the source card while dragging (feels like carrying the card).
-        _modelDragSource = border;
-        border.Opacity = 0.35;
-        border.RenderTransform = new TranslateTransform(0, -2);
-        border.ZIndex = 20;
+        var pos = e.GetPosition(this);
+        var dx = pos.X - _reorderPressPoint.Value.X;
+        var dy = pos.Y - _reorderPressPoint.Value.Y;
 
+        if (!_reorderDragging)
+        {
+            if ((dx * dx + dy * dy) < 64)
+                return;
+            BeginReorderGhost(_reorderSourceBorder, _reorderModel);
+            _reorderDragging = true;
+        }
+
+        MoveReorderGhost(pos);
+        UpdateDropHighlightAt(pos);
+        e.Handled = true;
+    }
+
+    private void OnModelCardPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
         try
         {
-            // In-process only — avoids the ugly system file/text drag icon.
-            var transfer = new DataTransfer();
-            transfer.Add(DataTransferItem.Create(ModelIdFormat, id));
-
-            var effect = await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
-            ClearDropHighlight();
-
-            // No successful drop → treat as click to open editor.
-            if (effect == DragDropEffects.None && DataContext is MainViewModel vm)
+            if (_reorderDragging && _reorderModel is not null && DataContext is MainViewModel vm)
             {
+                var target = HitTestModelCard(e.GetPosition(this));
+                if (target?.DataContext is ModelEditItem targetModel)
+                    vm.ReorderModel(_reorderModel.ModelId, targetModel.ModelId);
+            }
+            else if (!_reorderDragging && _reorderModel is not null && DataContext is MainViewModel vm2)
+            {
+                var model = _reorderModel;
                 Dispatcher.UIThread.Post(() =>
                 {
-                    try { vm.ExecuteSelectModel(model); }
-                    catch (Exception ex) { vm.ReportUiError($"Model selection failed: {ex.Message}"); }
+                    try { vm2.ExecuteSelectModel(model); }
+                    catch (Exception ex) { vm2.ReportUiError($"Model selection failed: {ex.Message}"); }
                 }, DispatcherPriority.Background);
             }
         }
         finally
         {
-            RestoreDragSourceVisual();
+            EndReorderSession(e.Pointer);
+            e.Handled = true;
         }
     }
 
-    private void OnModelCardPointerMoved(object? sender, PointerEventArgs e) { }
-    private void OnModelCardPointerReleased(object? sender, PointerReleasedEventArgs e) { }
     private void OnModelCardPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+        => EndReorderSession(null);
+
+    private void BeginReorderGhost(Border source, ModelEditItem model)
     {
-        ClearDropHighlight();
-        RestoreDragSourceVisual();
+        source.Opacity = 0.3;
+
+        var layer = this.FindControl<Canvas>("PART_DragGhostLayer");
+        if (layer is null)
+            return;
+
+        var w = source.Bounds.Width > 0 ? source.Bounds.Width : 300;
+        var h = source.Bounds.Height > 0 ? source.Bounds.Height : 80;
+
+        _reorderGhostBorder = new Border
+        {
+            Width = w,
+            Height = h,
+            CornerRadius = new CornerRadius(12),
+            Background = new SolidColorBrush(Color.Parse("#DD1E1E2E")),
+            BorderBrush = Brush("#89B4FA"),
+            BorderThickness = new Thickness(2),
+            Padding = new Thickness(12, 10),
+            IsHitTestVisible = false,
+            Child = new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = model.ModelId ?? "model",
+                        FontSize = 13,
+                        FontWeight = FontWeight.Bold,
+                        Foreground = Brush("#CDD6F4")
+                    },
+                    new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(model.Name) ? " " : model.Name!,
+                        FontSize = 11,
+                        Foreground = Brush("#A6ADC8"),
+                        TextTrimming = TextTrimming.CharacterEllipsis
+                    }
+                }
+            }
+        };
+
+        layer.Children.Clear();
+        layer.Children.Add(_reorderGhostBorder);
+        layer.IsVisible = true;
     }
 
-    private void RestoreDragSourceVisual()
+    private void MoveReorderGhost(Point windowPos)
     {
-        if (_modelDragSource is not null)
+        if (_reorderGhostBorder is null) return;
+        Canvas.SetLeft(_reorderGhostBorder, windowPos.X - _reorderPressInCard.X);
+        Canvas.SetTop(_reorderGhostBorder, windowPos.Y - _reorderPressInCard.Y);
+    }
+
+    private void UpdateDropHighlightAt(Point windowPos)
+    {
+        var target = HitTestModelCard(windowPos);
+        if (ReferenceEquals(target, _reorderSourceBorder))
+            target = null;
+
+        if (!ReferenceEquals(_modelDropHighlight, target))
         {
-            _modelDragSource.Opacity = 1;
-            _modelDragSource.RenderTransform = null;
-            _modelDragSource.ZIndex = 0;
-            _modelDragSource = null;
+            ClearDropHighlight();
+            if (target is not null)
+            {
+                target.Classes.Add("model-card-drop-target");
+                _modelDropHighlight = target;
+            }
         }
+    }
+
+    private Border? HitTestModelCard(Point windowPos)
+    {
+        if (this.InputHitTest(windowPos) is not Visual hit)
+            return null;
+
+        Control? c = hit as Control ?? hit.FindAncestorOfType<Control>();
+        while (c is not null)
+        {
+            if (c is Border b && b.Classes.Contains("model-card") && b.DataContext is ModelEditItem)
+                return b;
+            c = c.GetVisualParent() as Control;
+        }
+        return null;
+    }
+
+    private void EndReorderSession(IPointer? pointer)
+    {
+        if (_reorderSourceBorder is not null)
+        {
+            _reorderSourceBorder.Opacity = 1;
+            _reorderSourceBorder = null;
+        }
+
+        var layer = this.FindControl<Canvas>("PART_DragGhostLayer");
+        if (layer is not null)
+        {
+            layer.Children.Clear();
+            layer.IsVisible = false;
+        }
+        _reorderGhostBorder = null;
+        ClearDropHighlight();
+        _reorderPressPoint = null;
+        _reorderModel = null;
+        _reorderDragging = false;
+        pointer?.Capture(null);
     }
 
     private void ClearDropHighlight()
@@ -418,59 +538,6 @@ public partial class MainWindow : Window
             _modelDropHighlight.Classes.Remove("model-card-drop-target");
             _modelDropHighlight = null;
         }
-    }
-
-    private static bool IsModelDrag(IDataTransfer? dt) =>
-        dt is not null && dt.Contains(ModelIdFormat);
-
-    private static string? GetDraggedModelId(IDataTransfer? dt)
-    {
-        if (dt is null) return null;
-        return dt.TryGetValue(ModelIdFormat);
-    }
-
-    private void OnModelCardDragOver(object? sender, DragEventArgs e)
-    {
-        var ok = IsModelDrag(e.DataTransfer);
-        e.DragEffects = ok ? DragDropEffects.Move : DragDropEffects.None;
-        if (ok && sender is Border border)
-        {
-            // Don't highlight the card being dragged.
-            if (ReferenceEquals(border, _modelDragSource))
-            {
-                e.Handled = true;
-                return;
-            }
-            if (!ReferenceEquals(_modelDropHighlight, border))
-            {
-                ClearDropHighlight();
-                border.Classes.Add("model-card-drop-target");
-                _modelDropHighlight = border;
-            }
-        }
-        e.Handled = true;
-    }
-
-    private void OnModelCardDragLeave(object? sender, DragEventArgs e)
-    {
-        if (sender is Border border && ReferenceEquals(_modelDropHighlight, border))
-            ClearDropHighlight();
-    }
-
-    private void OnModelCardDrop(object? sender, DragEventArgs e)
-    {
-        ClearDropHighlight();
-        if (DataContext is not MainViewModel vm)
-            return;
-        if (sender is not Border targetBorder || targetBorder.DataContext is not ModelEditItem target)
-            return;
-
-        var sourceId = GetDraggedModelId(e.DataTransfer);
-        if (string.IsNullOrWhiteSpace(sourceId))
-            return;
-
-        vm.ReorderModel(sourceId, target.ModelId);
-        e.Handled = true;
     }
 
 private async void OnChooseModelClick(object? sender, RoutedEventArgs e)
