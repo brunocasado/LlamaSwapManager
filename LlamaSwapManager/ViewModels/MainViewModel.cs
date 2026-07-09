@@ -137,9 +137,23 @@ public partial class MainViewModel : ObservableObject
     public IReadOnlyList<string> AutoOnOffOptions { get; } = new[] { "", "auto", "on", "off" };
     public IReadOnlyList<string> SplitModeOptions { get; } = new[] { "", "none", "layer", "row", "tensor" };
     public IReadOnlyList<string> CacheTypeOptions { get; } = new[] { "", "f16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl", "bf16", "f32" };
+    // Empty/(default) omits --reasoning (server/model default). Explicit off/on/auto always emit.
     public IReadOnlyList<string> ReasoningOptions { get; } = new[] { "", "auto", "on", "off" };
     public IReadOnlyList<string> ReasoningFormatOptions { get; } = new[] { "", "none", "deepseek", "qwen3", "auto" };
-    public IReadOnlyList<string> GpuLayersOptions { get; } = new[] { "", "auto", "all", "0" };
+    // Editable combo: free-type numeric N also accepted via IsEditable combobox.
+    public IReadOnlyList<string> GpuLayersOptions { get; } = new[] { "", "auto", "all", "0", "20", "30", "40", "50", "60", "80", "99" };
+    public IReadOnlyList<string> ChatTemplatePresets { get; } = new[]
+    {
+        "",
+        "chatml",
+        "llama2",
+        "llama3",
+        "mistral",
+        "gemma",
+        "command-r",
+        "deepseek",
+        "vicuna",
+    };
     public IReadOnlyList<string> CommonSamplersOptions { get; } = new[] { "", "penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;temperature", "penalties;top_k;top_p;min_p;temperature", "top_k;top_p;temperature" };
 
     // Commands
@@ -704,6 +718,8 @@ public partial class MainViewModel : ObservableObject
             UseJinja = false,
             FitOn = false,
             NoMmap = false,
+            // Fail-safe: new models force thinking off so it is not silently on by default.
+            Reasoning = "off",
             IsNew = true
         };
         foreach (var m in Models) m.IsSelected = false;
@@ -2101,6 +2117,15 @@ public partial class ModelEditItem : ObservableObject
             if (!string.IsNullOrWhiteSpace(value)) parts.Add($"{flag} {QuoteIfNeeded(value.Trim())}");
         }
 
+        static string? NormalizeOptional(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var t = value.Trim();
+            // UI may show "(default)" for omit; never emit that token to the CLI.
+            if (t.Equals("(default)", StringComparison.OrdinalIgnoreCase)) return null;
+            return t;
+        }
+
         if (!string.IsNullOrWhiteSpace(LlamaServerPath)) parts.Add(QuoteIfNeeded(LlamaServerPath.Trim()));
         if (!string.IsNullOrWhiteSpace(ModelPath)) AddValue("-m", ModelPath);
         else if (!string.IsNullOrWhiteSpace(HfModel))
@@ -2119,7 +2144,7 @@ public partial class ModelEditItem : ObservableObject
         AddValue("--predict", Predict);
         AddValue("--batch-size", BatchSize);
         AddValue("--ubatch-size", UBatchSize);
-        AddValue("--gpu-layers", GpuLayers);
+        AddValue("--gpu-layers", NormalizeOptional(GpuLayers));
         AddValue("--device", Device);
         AddValue("--split-mode", SplitMode);
         AddValue("--tensor-split", TensorSplit);
@@ -2154,10 +2179,11 @@ public partial class ModelEditItem : ObservableObject
         AddValue("--api-key", ApiKey);
 
         if (UseJinja) parts.Add("--jinja");
-        AddValue("--chat-template", ChatTemplate);
-        AddValue("--reasoning", Reasoning);
-        AddValue("--reasoning-format", ReasoningFormat);
-        AddValue("--reasoning-budget", ReasoningBudget);
+        AddValue("--chat-template", NormalizeOptional(ChatTemplate));
+        // Critical: "off" must always emit --reasoning off (not omit the flag).
+        AddValue("--reasoning", NormalizeOptional(Reasoning));
+        AddValue("--reasoning-format", NormalizeOptional(ReasoningFormat));
+        AddValue("--reasoning-budget", NormalizeOptional(ReasoningBudget));
 
         if (!string.IsNullOrWhiteSpace(ExtraArgs)) parts.Add(ExtraArgs.Trim());
         return string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
