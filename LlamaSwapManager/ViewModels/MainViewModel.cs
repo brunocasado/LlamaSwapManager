@@ -185,6 +185,10 @@ public partial class MainViewModel : ObservableObject
     public ICommand NavigateToModelsCommand { get; }
     public ICommand NavigateToMatrixCommand { get; }
     public ICommand NavigateToLogsCommand { get; }
+    public ICommand NavigateToSettingsCommand { get; }
+    public ICommand NavigateToUpdatesCommand { get; }
+    public ICommand NavigateToConfigPreviewCommand { get; }
+    public ICommand CloseModelEditorCommand { get; }
 
     // CanExecute
     public bool CanStart => StartButtonEnabled;
@@ -236,7 +240,11 @@ public partial class MainViewModel : ObservableObject
         NavigateToMetricsCommand = new RelayCommand(() => CurrentView = "metrics");
         NavigateToModelsCommand = new RelayCommand(() => CurrentView = "models");
         NavigateToMatrixCommand = new RelayCommand(() => CurrentView = "matrix");
-        NavigateToLogsCommand = new RelayCommand(() => CurrentView = "logs");
+        NavigateToLogsCommand = new RelayCommand(() => CurrentView = "metrics"); // metrics hosts live logs
+        NavigateToSettingsCommand = new RelayCommand(() => CurrentView = "settings");
+        NavigateToUpdatesCommand = new RelayCommand(() => CurrentView = "updates");
+        NavigateToConfigPreviewCommand = new RelayCommand(() => CurrentView = "preview");
+        CloseModelEditorCommand = new RelayCommand(CloseModelEditor);
 
         // Auto-detect paths first
         AutoDetectPaths();
@@ -485,6 +493,12 @@ public partial class MainViewModel : ObservableObject
         // [manager] and [ui] messages go to global log only, not to specific panels
     }
 
+    partial void OnCurrentViewChanged(string value)
+    {
+        // No-op hook — bindings re-evaluate via generated PropertyChanged on CurrentView.
+        OnLogMessage($"[ui] navigate → {value}");
+    }
+
     private void UpdateUI()
     {
         // Prefer live process/API truth, but never collapse in-flight Starting/Stopping mid-command.
@@ -686,6 +700,22 @@ public partial class MainViewModel : ObservableObject
         StatusText = message;
         StatusColor = "#A6E3A1";
         OnLogMessage($"[ui] {message}");
+    }
+
+
+    private void CloseModelEditor()
+    {
+        if (SelectedModel?.IsNew == true)
+        {
+            ExecuteCancelModel();
+            return;
+        }
+        foreach (var m in Models) m.IsSelected = false;
+        SelectedModel = null;
+        HasSelectedModel = false;
+        IsNewModel = false;
+        UpdateSelectedModelSourceLabel();
+        (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
 
     public void ExecuteSelectModel(ModelEditItem model)

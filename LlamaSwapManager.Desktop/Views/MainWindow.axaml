@@ -7,62 +7,124 @@
         x:DataType="vm:MainViewModel"
         Title="Llama Swap Manager"
         Icon="avares://LlamaSwapManager.Desktop/Assets/llama.ico"
-        Width="1200"
-        Height="800"
-        MinWidth="1000"
-        MinHeight="650"
-        WindowStartupLocation="CenterScreen">
+        Width="1280"
+        Height="840"
+        MinWidth="1040"
+        MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B0B12">
 
   <Design.DataContext>
     <vm:MainViewModel />
   </Design.DataContext>
 
-  <Panel>
-    <!-- Top bar -->
-    <Panel.ZIndex>1</Panel.ZIndex>
-    <Border Height="48" VerticalAlignment="Top" Background="#11111B" BorderBrush="#313244" BorderThickness="0,0,0,1">
+  <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,*">
+    <Border Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Height="52"
+            Background="#0F0F17" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" ZIndex="2">
       <DockPanel Margin="16,0">
-        <TextBlock Text="Llama Swap Manager"
-                   FontSize="15"
-                   FontWeight="Bold"
-                   Foreground="#CDD6F4"
-                   VerticalAlignment="Center"
-                   DockPanel.Dock="Left" />
-        <StackPanel Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Center"
-                    Spacing="8">
-          <Ellipse Width="10" Height="10" Fill="{Binding StatusColor}" />
-          <TextBlock Text="{Binding StatusText}"
-                     FontSize="12"
-                     Foreground="{Binding StatusColor}"
-                     VerticalAlignment="Center" />
-          <Button Content="Start"
-                  Command="{Binding StartCommand}"
-                  Classes="success"
-                  Padding="10,4"
-                  IsEnabled="{Binding StartButtonEnabled}" />
-          <Button Content="Stop"
-                  Command="{Binding StopCommand}"
-                  Classes="danger"
-                  Padding="10,4"
-                  IsEnabled="{Binding StopButtonEnabled}" />
-          <Button Content="Restart"
-                  Command="{Binding RestartCommand}"
-                  Classes="warning"
-                  Padding="10,4"
-                  IsEnabled="{Binding RestartButtonEnabled}" />
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" DockPanel.Dock="Left">
+          <Border Width="28" Height="28" CornerRadius="8" Background="#1E1E2E">
+            <TextBlock Text="🦙" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Text="LlamaSwap" FontSize="15" FontWeight="Bold" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+          <TextBlock Text="Manager" FontSize="15" Foreground="#6C7086" VerticalAlignment="Center"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Border Background="#1E1E2E" CornerRadius="16" Padding="10,4">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Ellipse Width="8" Height="8" Fill="{Binding StatusColor}" VerticalAlignment="Center"/>
+              <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{Binding StatusColor}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+          <Button Content="Start" Command="{Binding StartCommand}" Classes="success" Padding="12,6" IsEnabled="{Binding StartButtonEnabled}"/>
+          <Button Content="Stop" Command="{Binding StopCommand}" Classes="danger" Padding="12,6" IsEnabled="{Binding StopButtonEnabled}"/>
+          <Button Content="Restart" Command="{Binding RestartCommand}" Classes="warning" Padding="12,6" IsEnabled="{Binding RestartButtonEnabled}"/>
         </StackPanel>
       </DockPanel>
     </Border>
 
-    <!-- Main content with tabs -->
-    <TabControl Margin="0,48,0,0"
-                Background="#1E1E2E"
-                BorderBrush="#313244">
+    <Border Grid.Row="1" Grid.Column="0" Background="#0F0F17" BorderBrush="#1F1F2E" BorderThickness="0,0,1,0">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="0,12,0,0" Spacing="2">
+          <TextBlock Text="WORKSPACE" FontSize="10" FontWeight="Bold" Foreground="#585B70" Margin="18,4,0,6"/>
+              <Button Command="{Binding NavigateToModelsCommand}" Classes="nav"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="12,10" Margin="8,2" Background="Transparent">
+                <DockPanel>
+                  <Border Width="3" Height="18" CornerRadius="2" Margin="0,0,10,0"
+                          Background="#89B4FA" DockPanel.Dock="Left" VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=models}" />
+                  <TextBlock Text="Models" FontSize="13" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Button>
+              <Button Command="{Binding NavigateToMatrixCommand}" Classes="nav"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="12,10" Margin="8,2" Background="Transparent">
+                <DockPanel>
+                  <Border Width="3" Height="18" CornerRadius="2" Margin="0,0,10,0"
+                          Background="#89B4FA" DockPanel.Dock="Left" VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=matrix}" />
+                  <TextBlock Text="Matrix" FontSize="13" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Button>
+              <Button Command="{Binding NavigateToMetricsCommand}" Classes="nav"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="12,10" Margin="8,2" Background="Transparent">
+                <DockPanel>
+                  <Border Width="3" Height="18" CornerRadius="2" Margin="0,0,10,0"
+                          Background="#89B4FA" DockPanel.Dock="Left" VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=metrics}" />
+                  <TextBlock Text="Metrics" FontSize="13" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Button>
+              <Button Command="{Binding NavigateToConfigPreviewCommand}" Classes="nav"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="12,10" Margin="8,2" Background="Transparent">
+                <DockPanel>
+                  <Border Width="3" Height="18" CornerRadius="2" Margin="0,0,10,0"
+                          Background="#89B4FA" DockPanel.Dock="Left" VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=preview}" />
+                  <TextBlock Text="Config Preview" FontSize="13" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Button>
+          <TextBlock Text="SYSTEM" FontSize="10" FontWeight="Bold" Foreground="#585B70" Margin="18,16,0,6"/>
+              <Button Command="{Binding NavigateToUpdatesCommand}" Classes="nav"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="12,10" Margin="8,2" Background="Transparent">
+                <DockPanel>
+                  <Border Width="3" Height="18" CornerRadius="2" Margin="0,0,10,0"
+                          Background="#89B4FA" DockPanel.Dock="Left" VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=updates}" />
+                  <TextBlock Text="Updates" FontSize="13" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Button>
+              <Button Command="{Binding NavigateToSettingsCommand}" Classes="nav"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="12,10" Margin="8,2" Background="Transparent">
+                <DockPanel>
+                  <Border Width="3" Height="18" CornerRadius="2" Margin="0,0,10,0"
+                          Background="#89B4FA" DockPanel.Dock="Left" VerticalAlignment="Center"
+                          IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=settings}" />
+                  <TextBlock Text="Settings" FontSize="13" Foreground="#CDD6F4" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Button>
+        </StackPanel>
+        <Border DockPanel.Dock="Bottom" Padding="14" BorderBrush="#1F1F2E" BorderThickness="0,1,0,0">
+          <StackPanel Spacing="4">
+            <TextBlock Text="Status" FontSize="10" Foreground="#585B70"/>
+            <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+        <Border />
+      </DockPanel>
+    </Border>
 
-      <!-- ===================== MODELS TAB ===================== -->
-        <TabItem Header="Models">
+    <Border Grid.Row="1" Grid.Column="1" Background="#12121A">
+      <Panel>
+        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=models}">
+
+        <!-- Models: shell-hosted original dual-pane for stability, framed in hermes content padding -->
+        <Border Padding="0" Background="#12121A">
           <Grid ColumnDefinitions="300,1*">
             <!-- Left: Model list only -->
             <Border Grid.Row="0" Grid.Column="0" Background="#181825" BorderBrush="#313244" BorderThickness="0,0,1,0">
@@ -437,11 +499,12 @@
                 </Border>
               </Grid>
         </Grid>
-      </TabItem>
+      
+        </Border>
 
-      <!-- ===================== MATRIX TAB ===================== -->
-      <TabItem Header="Matrix">
-        <Grid RowDefinitions="Auto,*" Margin="20">
+        </Panel>
+        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=matrix}">
+          <Border Padding="4">        <Grid RowDefinitions="Auto,*" Margin="20">
           <StackPanel Grid.Row="0" Spacing="12" Margin="0,0,0,12">
             <TextBlock Text="Matrix Configuration" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
             <Border Padding="16" Background="#11111B" BorderBrush="#313244" BorderThickness="1" CornerRadius="10">
@@ -556,11 +619,11 @@
             </TabItem>
           </TabControl>
         </Grid>
-      </TabItem>
-
-      <!-- ===================== CONFIG PREVIEW TAB ===================== -->
-      <TabItem Header="Config Preview">
-        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      
+          </Border>
+        </Panel>
+        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=preview}">
+          <Border Padding="4">        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="16">
             <TextBlock Text="Generated config.yml" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
             <TextBlock Text="Preview before saving."
@@ -586,11 +649,11 @@
             </StackPanel>
           </StackPanel>
         </ScrollViewer>
-      </TabItem>
-
-      <!-- ===================== METRICS TAB ===================== -->
-      <TabItem Header="Metrics">
-        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="20">
+      
+          </Border>
+        </Panel>
+        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=metrics}">
+          <Border Padding="4">        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="20">
           <!-- Header -->
           <Border Grid.Row="0" Padding="16" Background="#313244" CornerRadius="8" Margin="0,0,0,16">
             <StackPanel Spacing="6">
@@ -718,11 +781,11 @@
             <TextBlock Text="Logs update in real-time. Upstream logs from llama-server via streaming API." FontSize="10" Foreground="#6C7086" />
           </Border>
         </Grid>
-      </TabItem>
-
-      <!-- ===================== SETTINGS TAB ===================== -->
-      <TabItem Header="Settings">
-        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      
+          </Border>
+        </Panel>
+        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=settings}">
+          <Border Padding="4">        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="16">
             <!-- Paths -->
             <Border Padding="16" Background="#313244" CornerRadius="8">
@@ -856,11 +919,11 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-      </TabItem>
-
-      <!-- ===================== UPDATES TAB ===================== -->
-      <TabItem Header="Updates">
-        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      
+          </Border>
+        </Panel>
+        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=updates}">
+          <Border Padding="4">        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Spacing="16" DataContext="{Binding UpdateViewModel}">
             <!-- Header -->
             <Border Padding="16" Background="#313244" CornerRadius="8">
@@ -955,7 +1018,10 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-      </TabItem>
-    </TabControl>
-  </Panel>
+      
+          </Border>
+        </Panel>
+      </Panel>
+    </Border>
+  </Grid>
 </Window>
