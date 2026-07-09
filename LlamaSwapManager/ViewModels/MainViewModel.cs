@@ -756,6 +756,25 @@ public partial class MainViewModel : ObservableObject
         PersistConfigToDisk("Model order updated.");
     }
 
+    /// <summary>Move <paramref name="sourceId"/> to the index of <paramref name="targetId"/> (insert before target).</summary>
+    public void ReorderModel(string? sourceId, string? targetId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId) || string.IsNullOrWhiteSpace(targetId)) return;
+        if (string.Equals(sourceId, targetId, StringComparison.Ordinal)) return;
+
+        var from = -1;
+        var to = -1;
+        for (var i = 0; i < Models.Count; i++)
+        {
+            if (string.Equals(Models[i].ModelId, sourceId, StringComparison.Ordinal)) from = i;
+            if (string.Equals(Models[i].ModelId, targetId, StringComparison.Ordinal)) to = i;
+        }
+        if (from < 0 || to < 0 || from == to) return;
+
+        Models.Move(from, to);
+        PersistConfigToDisk("Model order updated.");
+    }
+
     public void ExecuteSelectModel(ModelEditItem model)
        {
            if (model == null) return;

@@ -14,7 +14,7 @@ RAW_DIR="$PUBLISH_DIR/raw"
 APP_BUNDLE="$PUBLISH_DIR/LlamaSwapManager.app"
 ICON_ICNS="$PROJECT_DIR/icon.icns"
 EXECUTABLE="LlamaSwapManager.Desktop"
-APP_NAME="LlamaSwapManager"
+APP_NAME="Llama Swap Manager"
 BUNDLE_ID="me.brunocasado.llamaswapmanager"
 VERSION="1.0.0"
 

@@ -19,6 +19,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LlamaSwapManager.Desktop;
 using LlamaSwapManager.ViewModels;
 
@@ -41,6 +42,8 @@ public partial class MainWindow : Window
     private Border? _toastBorder;
     private TextBlock? _toastText;
     private CancellationTokenSource? _toastCts;
+
+    private Border? _modelDropHighlight;
 
     /// <summary>
     /// Tray Quit / Cmd+Q path: allows Closing to complete so the process can shut down.
@@ -335,7 +338,95 @@ public partial class MainWindow : Window
     }
 
 
-    private async void OnChooseModelClick(object? sender, RoutedEventArgs e)
+
+    
+    // ── Model card drag-reorder (Avalonia 12 DataTransfer API) ───────────
+
+    private async void OnModelCardPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Border border || border.DataContext is not ModelEditItem model)
+            return;
+        // Don't drag when interacting with buttons (Clone).
+        if (e.Source is Button || (e.Source as Control)?.FindAncestorOfType<Button>() is not null)
+            return;
+        if (!e.GetCurrentPoint(border).Properties.IsLeftButtonPressed)
+            return;
+
+        var id = model.ModelId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(id))
+            return;
+
+        var transfer = new DataTransfer();
+        transfer.Add(DataTransferItem.CreateText(id));
+
+        var effect = await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
+        ClearDropHighlight();
+
+        // No successful drop → treat as click to open editor.
+        if (effect == DragDropEffects.None && DataContext is MainViewModel vm)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                try { vm.ExecuteSelectModel(model); }
+                catch (Exception ex) { vm.ReportUiError($"Model selection failed: {ex.Message}"); }
+            }, DispatcherPriority.Background);
+        }
+    }
+
+    // Kept for XAML wire-up compatibility (drag starts on press via DoDragDropAsync).
+    private void OnModelCardPointerMoved(object? sender, PointerEventArgs e) { }
+    private void OnModelCardPointerReleased(object? sender, PointerReleasedEventArgs e) { }
+    private void OnModelCardPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e) => ClearDropHighlight();
+
+    private void ClearDropHighlight()
+    {
+        if (_modelDropHighlight is not null)
+        {
+            _modelDropHighlight.Classes.Remove("model-card-drop-target");
+            _modelDropHighlight = null;
+        }
+    }
+
+    private void OnModelCardDragOver(object? sender, DragEventArgs e)
+    {
+        var dt = e.DataTransfer;
+        var ok = dt is not null && (dt.Contains(DataFormat.Text) || !string.IsNullOrEmpty(dt.TryGetText()));
+        e.DragEffects = ok ? DragDropEffects.Move : DragDropEffects.None;
+        if (ok && sender is Border border)
+        {
+            if (!ReferenceEquals(_modelDropHighlight, border))
+            {
+                ClearDropHighlight();
+                border.Classes.Add("model-card-drop-target");
+                _modelDropHighlight = border;
+            }
+        }
+        e.Handled = true;
+    }
+
+    private void OnModelCardDragLeave(object? sender, DragEventArgs e)
+    {
+        if (sender is Border border && ReferenceEquals(_modelDropHighlight, border))
+            ClearDropHighlight();
+    }
+
+    private void OnModelCardDrop(object? sender, DragEventArgs e)
+    {
+        ClearDropHighlight();
+        if (DataContext is not MainViewModel vm)
+            return;
+        if (sender is not Border targetBorder || targetBorder.DataContext is not ModelEditItem target)
+            return;
+
+        var sourceId = e.DataTransfer?.TryGetText();
+        if (string.IsNullOrWhiteSpace(sourceId))
+            return;
+
+        vm.ReorderModel(sourceId, target.ModelId);
+        e.Handled = true;
+    }
+
+private async void OnChooseModelClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm || vm.SelectedModel is null)
             return;

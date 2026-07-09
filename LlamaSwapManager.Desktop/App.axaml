@@ -104,6 +104,10 @@
     <Style Selector="Border.card:pointerover">
       <Setter Property="BorderBrush" Value="#45475A"/>
     </Style>
+    <Style Selector="Border.model-card-drop-target">
+      <Setter Property="BorderBrush" Value="#89B4FA"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
     <Style Selector="Border.pill">
       <Setter Property="Background" Value="#1E1E2E"/>
       <Setter Property="CornerRadius" Value="6"/>

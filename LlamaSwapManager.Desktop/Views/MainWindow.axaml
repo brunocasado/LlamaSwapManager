@@ -129,7 +129,7 @@
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="4">
                   <TextBlock Text="Models" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                  <TextBlock Text="Profiles for llama-server. Click a card to edit. Use ↑↓ to reorder (saved to config.yml)." FontSize="12" Foreground="#6C7086"/>
+                  <TextBlock Text="Profiles for llama-server. Drag cards (⠿) to reorder — order is saved to config.yml." FontSize="12" Foreground="#6C7086"/>
                 </StackPanel>
                 <Button Grid.Column="1" Content="+ Add model" Command="{Binding AddModelCommand}"
                         Classes="success" Padding="14,8" VerticalAlignment="Center"
@@ -154,7 +154,7 @@
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16"
                           IsVisible="{Binding Models.Count, Converter={x:Static conv:CountToBoolConverter.Instance}}">
-              <ItemsControl ItemsSource="{Binding Models}">
+              <ItemsControl x:Name="ModelsItemsControl" ItemsSource="{Binding Models}">
                 <ItemsControl.ItemsPanel>
                   <ItemsPanelTemplate>
                     <WrapPanel/>
@@ -162,29 +162,34 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:ModelEditItem">
-                    <Border Width="300" Classes="card" Margin="8" Cursor="Hand"
-                            PointerReleased="OnModelItemClick"
-                            Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}">
-                      <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                    <Border Width="300" Classes="card model-card" Margin="8" Cursor="Hand"
+                            Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}"
+                            DragDrop.AllowDrop="True"
+                            DragDrop.DragOver="OnModelCardDragOver"
+                            DragDrop.DragLeave="OnModelCardDragLeave"
+                            DragDrop.Drop="OnModelCardDrop"
+                            PointerPressed="OnModelCardPointerPressed"
+                            PointerMoved="OnModelCardPointerMoved"
+                            PointerReleased="OnModelCardPointerReleased"
+                            PointerCaptureLost="OnModelCardPointerCaptureLost">
+                      <Grid ColumnDefinitions="22,*">
+                        <TextBlock Grid.Column="0" Text="⠿" FontSize="14" Foreground="#585B70"
+                                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                                   Margin="0,0,4,0" ToolTip.Tip="Drag to reorder"
+                                   Classes="drag-grip"/>
+                        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                          <Button Content="↑" Classes="ghost" Padding="6,2" FontSize="12"
-                                  ToolTip.Tip="Move earlier in config.yml"
-                                  PointerPressed="OnCloneModelPointerPressed" Click="OnMoveModelUpClick"/>
-                          <Button Content="↓" Classes="ghost" Padding="6,2" FontSize="12"
-                                  ToolTip.Tip="Move later in config.yml"
-                                  PointerPressed="OnCloneModelPointerPressed" Click="OnMoveModelDownClick"/>
-                          <Button Content="Clone" Classes="ghost" Padding="8,3" FontSize="11"
-                                  ToolTip.Tip="Clone for parameter experiments"
-                                  PointerPressed="OnCloneModelPointerPressed" Click="OnCloneModelClick"/>
-                        </StackPanel>
+                        <Button Grid.Row="0" Grid.Column="1" Content="Clone" Classes="ghost" Padding="8,3" FontSize="11"
+                                ToolTip.Tip="Clone for parameter experiments"
+                                PointerPressed="OnCloneModelPointerPressed" Click="OnCloneModelClick"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Name}" FontSize="12" Foreground="#A6ADC8" Margin="0,6,0,0"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CmdPreview}" FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" MaxHeight="48"  Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CmdPreview}" FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" MaxHeight="48" Margin="0,8,0,0"/>
                         <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,12,0,0">
                           <Border Classes="pill"><TextBlock Text="{Binding Ttl, StringFormat=TTL {0}}" FontSize="10" Foreground="#89B4FA"/></Border>
                           <Border Classes="pill" IsVisible="{Binding UseJinja}"><TextBlock Text="jinja" FontSize="10" Foreground="#A6E3A1"/></Border>
                           <Border Classes="pill"><TextBlock Text="{Binding Reasoning}" FontSize="10" Foreground="#FAB387"/></Border>
                         </StackPanel>
+                        </Grid>
                       </Grid>
                     </Border>
                   </DataTemplate>
