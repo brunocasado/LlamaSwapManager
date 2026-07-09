@@ -106,6 +106,7 @@ public partial class MainViewModel : ObservableObject
 
     // Metrics navigation
     [ObservableProperty] private string _currentView = "models";
+    [ObservableProperty] private string _modelEditorSection = "essentials";
     [ObservableProperty] private long _prefillTokens;
     [ObservableProperty] private long _decodeTokens;
     [ObservableProperty] private double _tokensPerSecond;
@@ -185,6 +186,13 @@ public partial class MainViewModel : ObservableObject
     public ICommand NavigateToModelsCommand { get; }
     public ICommand NavigateToMatrixCommand { get; }
     public ICommand NavigateToLogsCommand { get; }
+    public ICommand NavigateToSettingsCommand { get; }
+    public ICommand NavigateToUpdatesCommand { get; }
+    public ICommand NavigateToConfigPreviewCommand { get; }
+    public ICommand CloseModelEditorCommand { get; }
+    public ICommand MoveModelUpCommand { get; }
+    public ICommand MoveModelDownCommand { get; }
+    public ICommand SetModelEditorSectionCommand { get; }
 
     // CanExecute
     public bool CanStart => StartButtonEnabled;
@@ -236,7 +244,18 @@ public partial class MainViewModel : ObservableObject
         NavigateToMetricsCommand = new RelayCommand(() => CurrentView = "metrics");
         NavigateToModelsCommand = new RelayCommand(() => CurrentView = "models");
         NavigateToMatrixCommand = new RelayCommand(() => CurrentView = "matrix");
-        NavigateToLogsCommand = new RelayCommand(() => CurrentView = "logs");
+        NavigateToLogsCommand = new RelayCommand(() => CurrentView = "metrics"); // metrics hosts live logs
+        NavigateToSettingsCommand = new RelayCommand(() => CurrentView = "settings");
+        NavigateToUpdatesCommand = new RelayCommand(() => CurrentView = "updates");
+        NavigateToConfigPreviewCommand = new RelayCommand(() => CurrentView = "preview");
+        CloseModelEditorCommand = new RelayCommand(CloseModelEditor);
+        MoveModelUpCommand = new RelayCommand<ModelEditItem?>(m => MoveModel(m, -1));
+        MoveModelDownCommand = new RelayCommand<ModelEditItem?>(m => MoveModel(m, +1));
+        SetModelEditorSectionCommand = new RelayCommand<string?>(section =>
+        {
+            if (!string.IsNullOrWhiteSpace(section))
+                ModelEditorSection = section.Trim();
+        });
 
         // Auto-detect paths first
         AutoDetectPaths();
@@ -485,6 +504,12 @@ public partial class MainViewModel : ObservableObject
         // [manager] and [ui] messages go to global log only, not to specific panels
     }
 
+    partial void OnCurrentViewChanged(string value)
+    {
+        // No-op hook — bindings re-evaluate via generated PropertyChanged on CurrentView.
+        OnLogMessage($"[ui] navigate → {value}");
+    }
+
     private void UpdateUI()
     {
         // Prefer live process/API truth, but never collapse in-flight Starting/Stopping mid-command.
@@ -546,7 +571,7 @@ public partial class MainViewModel : ObservableObject
     private async Task ExecuteStartAsync()
     {
         await RunLifecycleCommandAsync(
-            busyText: "Status: starting...",
+            busyText: "Starting…",
             action: () => _processManager.StartAsync(),
             resultLabel: "start");
     }
@@ -554,7 +579,7 @@ public partial class MainViewModel : ObservableObject
     private async Task ExecuteStopAsync()
     {
         await RunLifecycleCommandAsync(
-            busyText: "Status: stopping...",
+            busyText: "Stopping…",
             action: () => _processManager.StopAsync(),
             resultLabel: "stop");
     }
@@ -562,7 +587,7 @@ public partial class MainViewModel : ObservableObject
     private async Task ExecuteRestartAsync()
     {
         await RunLifecycleCommandAsync(
-            busyText: "Status: restarting...",
+            busyText: "Restarting…",
             action: () => _processManager.RestartAsync(),
             resultLabel: "restart");
     }
@@ -578,6 +603,7 @@ public partial class MainViewModel : ObservableObject
         StopButtonEnabled = false;
         RestartButtonEnabled = false;
         StatusText = busyText;
+            ShowToast(busyText);
 
         try
         {
@@ -599,6 +625,7 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusText = $"Error: {ex.Message}";
+            ShowToast($"Error: {ex.Message}");
             OnLogMessage($"[ui] {resultLabel} error: {ex.Message}");
         }
         finally
@@ -607,6 +634,8 @@ public partial class MainViewModel : ObservableObject
             try
             {
                 await RefreshRuntimeStateAsync();
+                // Toast final runtime status (also mirrored in sidebar RUNTIME).
+                ShowToast(StatusText);
             }
             catch (Exception ex)
             {
@@ -620,6 +649,7 @@ public partial class MainViewModel : ObservableObject
                     StartButtonEnabled = true;
                     StopButtonEnabled = false;
                     RestartButtonEnabled = true;
+                    ShowToast(StatusText);
                 });
             }
         }
@@ -676,16 +706,73 @@ public partial class MainViewModel : ObservableObject
 
     public void ReportUiError(string message)
     {
-        StatusText = message;
-        StatusColor = "#F38BA8";
         OnLogMessage($"[ui] {message}");
+        ShowToast(message);
     }
 
     public void ReportUiInfo(string message)
     {
-        StatusText = message;
-        StatusColor = "#A6E3A1";
         OnLogMessage($"[ui] {message}");
+        ShowToast(message);
+    }
+
+    /// <summary>Transient toast bubble (UI-only). Prefer this over StatusText for save/confirm feedback.</summary>
+    public event Action<string>? ToastRequested;
+
+    public void ShowToast(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        OnLogMessage($"[toast] {message}");
+        ToastRequested?.Invoke(message);
+    }
+
+
+    private void CloseModelEditor()
+    {
+        if (SelectedModel?.IsNew == true)
+        {
+            ExecuteCancelModel();
+            return;
+        }
+        foreach (var m in Models) m.IsSelected = false;
+        SelectedModel = null;
+        HasSelectedModel = false;
+        IsNewModel = false;
+        UpdateSelectedModelSourceLabel();
+        (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Reorder models in the UI collection; BuildConfigFromUI writes them in this order to config.yml.
+    /// </summary>
+    public void MoveModel(ModelEditItem? model, int delta)
+    {
+        if (model is null) return;
+        var i = Models.IndexOf(model);
+        if (i < 0) return;
+        var j = i + delta;
+        if (j < 0 || j >= Models.Count) return;
+        Models.Move(i, j);
+        PersistConfigToDisk(silent: true);
+    }
+
+    /// <summary>Move <paramref name="sourceId"/> to the index of <paramref name="targetId"/> (insert before target).</summary>
+    public void ReorderModel(string? sourceId, string? targetId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId) || string.IsNullOrWhiteSpace(targetId)) return;
+        if (string.Equals(sourceId, targetId, StringComparison.Ordinal)) return;
+
+        var from = -1;
+        var to = -1;
+        for (var i = 0; i < Models.Count; i++)
+        {
+            if (string.Equals(Models[i].ModelId, sourceId, StringComparison.Ordinal)) from = i;
+            if (string.Equals(Models[i].ModelId, targetId, StringComparison.Ordinal)) to = i;
+        }
+        if (from < 0 || to < 0 || from == to) return;
+
+        Models.Move(from, to);
+        PersistConfigToDisk(silent: true);
     }
 
     public void ExecuteSelectModel(ModelEditItem model)
@@ -695,8 +782,7 @@ public partial class MainViewModel : ObservableObject
            // If there's an unsaved new model, show warning and don't allow switching
            if (SelectedModel != null && SelectedModel.IsNew)
            {
-               StatusText = "Save or cancel the current model before selecting another one.";
-               StatusColor = "#F38BA8";
+               ShowToast("Save or cancel the current model before selecting another one.");
                return;
            }
          
@@ -705,6 +791,7 @@ public partial class MainViewModel : ObservableObject
            SelectedModel = model;
            HasSelectedModel = true;
            IsNewModel = false;
+           ModelEditorSection = "essentials";
            UpdateSelectedModelSourceLabel();
        }
 
@@ -729,6 +816,7 @@ public partial class MainViewModel : ObservableObject
         SelectedModel = newItem;
         HasSelectedModel = true;
         IsNewModel = true;
+        ModelEditorSection = "essentials";
         UpdateSelectedModelSourceLabel();
         EnsureMatrixModelCoverage();
         SyncEvictCostsWithCurrentVars(refreshPreview: false);
@@ -744,8 +832,7 @@ public partial class MainViewModel : ObservableObject
 
         if (SelectedModel?.IsNew == true)
         {
-            StatusText = "Save or cancel the current new model before cloning another one.";
-            StatusColor = "#F38BA8";
+            ShowToast("Save or cancel the current new model before cloning another one.");
             return;
         }
 
@@ -765,7 +852,7 @@ public partial class MainViewModel : ObservableObject
         EnsureMatrixModelCoverage();
         SyncEvictCostsWithCurrentVars(refreshPreview: false);
         UpdateConfigPreviewFromCurrentState();
-        StatusText = $"Cloned {source.ModelId}. Adjust parameters, then click Save.";
+        ShowToast($"Cloned {source.ModelId}. Adjust parameters, then click Save.");
         StatusColor = "#A6E3A1";
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
@@ -817,7 +904,7 @@ public partial class MainViewModel : ObservableObject
             SelectedModel = null;
             HasSelectedModel = false;
             IsNewModel = false;
-            StatusText = "New model cancelled.";
+            ShowToast("New model cancelled.");
             StatusColor = "#FAB387";
             UpdateSelectedModelSourceLabel();
             EnsureMatrixModelCoverage();
@@ -827,7 +914,7 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        StatusText = "Nothing to cancel: this model is already saved.";
+        ShowToast("Nothing to cancel: this model is already saved.");
         StatusColor = "#FAB387";
     }
 
@@ -865,16 +952,14 @@ public partial class MainViewModel : ObservableObject
 
         if (string.IsNullOrWhiteSpace(SelectedModel.ModelId))
         {
-            StatusText = "Error: Model ID is required.";
-            StatusColor = "#F38BA8";
+            ShowToast("Error: Model ID is required.");
             return;
         }
 
         var duplicate = Models.Any(m => !ReferenceEquals(m, SelectedModel) && string.Equals(m.ModelId, SelectedModel.ModelId, StringComparison.OrdinalIgnoreCase));
         if (duplicate)
         {
-            StatusText = $"Error: a model with ID {SelectedModel.ModelId} already exists.";
-            StatusColor = "#F38BA8";
+            ShowToast($"Error: a model with ID {SelectedModel.ModelId} already exists.");
             return;
         }
 
@@ -882,8 +967,10 @@ public partial class MainViewModel : ObservableObject
         IsNewModel = false;
         EnsureMatrixModelCoverage();
         SyncEvictCostsWithCurrentVars(refreshPreview: false);
-        PersistConfigToDisk("Model saved to config.yml!");
+        PersistConfigToDisk("Model saved.");
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        // Close the editor sheet after a successful save.
+        CloseModelEditor();
     }
 
     private void UpdateSelectedModelSourceLabel()
@@ -914,8 +1001,7 @@ public partial class MainViewModel : ObservableObject
         SelectedModel.HfModel = "";
         IsModelPickerOpen = false;
         UpdateSelectedModelSourceLabel();
-        StatusText = "Local model selected.";
-        StatusColor = "#A6E3A1";
+        ShowToast("Local model selected.");
     }
 
     private async Task ExecuteSearchHfModelsAsync()
@@ -964,24 +1050,66 @@ public partial class MainViewModel : ObservableObject
         HfSearchQuery = modelId;
         IsModelPickerOpen = false;
         UpdateSelectedModelSourceLabel();
-        StatusText = "Hugging Face model selected.";
-        StatusColor = "#A6E3A1";
+        ShowToast("Hugging Face model selected.");
     }
 
-    public void SetHfModelWithQuantization(string modelId, string quantizationFilename)
+    /// <summary>
+    /// Apply HF model selection. <paramref name="repoFileOrQuant"/> may be a quant tag
+    /// (Q4_K_M), a bare filename, or a repo-relative path (subdir/file.gguf).
+    /// Not every GGUF embeds a recognizable quant token — in that case we keep the file path.
+    /// </summary>
+    public void SetHfModelWithQuantization(string modelId, string repoFileOrQuant)
     {
         if (SelectedModel == null || string.IsNullOrWhiteSpace(modelId)) return;
         SelectedModel.HfModel = modelId;
         SelectedModel.ModelPath = "";
-        // Extract just the quantization label: filename without extension
-        // e.g., "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf" → "UD-Q4_K_XL"
-        var quantLabel = System.IO.Path.GetFileNameWithoutExtension(quantizationFilename);
-        SelectedModel.SelectedQuantization = quantLabel;
+
+        var raw = (repoFileOrQuant ?? string.Empty).Trim().Replace('\\', '/');
+        // Prefer known quant token from the leaf filename; otherwise keep relative path/filename for -hf repo:file
+        var leaf = Path.GetFileName(raw);
+        var quantFromName = ExtractQuantizationLabelForModel(leaf);
+        if (!string.IsNullOrWhiteSpace(quantFromName))
+            SelectedModel.SelectedQuantization = quantFromName;
+        else if (raw.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            SelectedModel.SelectedQuantization = raw; // path or filename without a standard quant tag
+        else if (!string.IsNullOrWhiteSpace(raw))
+            SelectedModel.SelectedQuantization = Path.GetFileNameWithoutExtension(raw);
+        else
+            SelectedModel.SelectedQuantization = "";
+
         HfSearchQuery = modelId;
         IsModelPickerOpen = false;
         UpdateSelectedModelSourceLabel();
-        StatusText = $"Hugging Face model selected ({quantLabel}).";
-        StatusColor = "#A6E3A1";
+        ShowToast(string.IsNullOrWhiteSpace(SelectedModel.SelectedQuantization)
+            ? "Hugging Face model selected."
+            : $"Hugging Face model selected ({SelectedModel.SelectedQuantization}).");
+    }
+
+    /// <summary>Shared quant extraction used by VM (mirrors UI helper patterns).</summary>
+    private static string? ExtractQuantizationLabelForModel(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var quantPatterns = new[]
+        {
+            "Q8_0","Q8_K","Q6_K","Q5_K_M","Q5_K_S","Q5_0","Q5_1",
+            "Q4_K_M","Q4_K_S","Q4_0","Q4_1","Q3_K_M","Q3_K_S","Q3_K_L",
+            "Q2_K","Q2_0","IQ4_XS","IQ4_NL","IQ3_XS","IQ3_S","IQ3_M",
+            "IQ2_XS","IQ2_S","IQ2_M","IQ1_S","IQ1_M",
+            "FP16","FP8_M","BF16","F32","F16","UD-Q4_K_XL","UD-Q5_K_XL","UD-Q6_K_XL","UD-Q8_K_XL"
+        };
+        foreach (var pattern in quantPatterns)
+        {
+            if (baseName.EndsWith(pattern, StringComparison.OrdinalIgnoreCase) ||
+                baseName.Contains("-" + pattern, StringComparison.OrdinalIgnoreCase) ||
+                baseName.Contains("_" + pattern, StringComparison.OrdinalIgnoreCase))
+                return pattern;
+        }
+        var match = System.Text.RegularExpressions.Regex.Match(
+            baseName,
+            @"[-_]((UD-)?[QIq][A-Za-z]*\d[\w_]*|FP\d+[A-Z_]*|BF\d+|F\d+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : null;
     }
 
     private void ApplyHfModel(string? modelId)
@@ -1141,13 +1269,11 @@ public partial class MainViewModel : ObservableObject
             _configService.SaveConfig(config, configPath);
             _rawConfig = config;
             ConfigPreview = config.ToYaml();
-            StatusText = $"Matrix saved to {configPath}";
-            StatusColor = "#A6E3A1";
+            ShowToast("Matrix saved.");
         }
         catch (Exception ex)
         {
-            StatusText = $"Matrix autosave failed: {ex.Message}";
-            StatusColor = "#F38BA8";
+            ShowToast($"Matrix autosave failed: {ex.Message}");
         }
     }
 
@@ -1171,13 +1297,13 @@ public partial class MainViewModel : ObservableObject
         finally { _matrixSyncDepth--; }
     }
 
-    private void PersistConfigToDisk(string successMessage)
+    private void PersistConfigToDisk(string? successMessage = null, bool silent = false)
     {
         var configPath = !string.IsNullOrWhiteSpace(ConfigFilePath) ? ConfigFilePath : _processManager.ConfigPath;
         if (string.IsNullOrWhiteSpace(configPath))
         {
-            StatusText = "Error: config.yml path is not set.";
-            StatusColor = "#F38BA8";
+            if (!silent)
+                ShowToast("Error: config.yml path is not set.");
             return;
         }
 
@@ -1185,8 +1311,9 @@ public partial class MainViewModel : ObservableObject
         _configService.SaveConfig(config, configPath);
         _rawConfig = config;
         ConfigPreview = config.ToYaml();
-        StatusText = successMessage;
-        StatusColor = "#A6E3A1";
+        // Never overwrite RUNTIME StatusText here — toast only (unless silent).
+        if (!silent && !string.IsNullOrWhiteSpace(successMessage))
+            ShowToast(successMessage);
     }
 
     private void SyncMatrixTextFromCollections()

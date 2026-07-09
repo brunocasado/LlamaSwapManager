@@ -1,7 +1,10 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows.Input;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -16,6 +19,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LlamaSwapManager.Desktop;
 using LlamaSwapManager.ViewModels;
 
@@ -35,6 +39,17 @@ public partial class MainWindow : Window
     }
 
     private bool _isExiting;
+    private Border? _toastBorder;
+    private TextBlock? _toastText;
+    private CancellationTokenSource? _toastCts;
+
+    private Border? _modelDropHighlight;
+    private Point? _reorderPressPoint;
+    private ModelEditItem? _reorderModel;
+    private Border? _reorderSourceBorder;
+    private bool _reorderDragging;
+    private Border? _reorderGhostBorder;
+    private Point _reorderPressInCard;
 
     /// <summary>
     /// Tray Quit / Cmd+Q path: allows Closing to complete so the process can shut down.
@@ -114,6 +129,15 @@ public partial class MainWindow : Window
 
     private async void OnWindowKeyDownTunnel(object? sender, KeyEventArgs e)
     {
+        // Esc closes model editor (and does not require a focused field).
+        if (e.Key == Key.Escape && DataContext is MainViewModel escVm && escVm.HasSelectedModel)
+        {
+            e.Handled = true;
+            if (escVm.CloseModelEditorCommand is ICommand closeCmd && closeCmd.CanExecute(null))
+                closeCmd.Execute(null);
+            return;
+        }
+
         if (ExtraArgsTextBox is null || !ExtraArgsTextBox.IsKeyboardFocusWithin)
             return;
 
@@ -127,6 +151,47 @@ public partial class MainWindow : Window
             e.Handled = true;
             await PasteExtraArgsTextAsync(ExtraArgsTextBox);
         }
+    }
+
+    private void OnDataContextChangedForToast(object? sender, EventArgs e)
+    {
+        WireToastFromViewModel();
+    }
+
+    private void WireToastFromViewModel()
+    {
+        if (DataContext is not MainViewModel vm) return;
+        vm.ToastRequested -= OnToastRequested;
+        vm.ToastRequested += OnToastRequested;
+    }
+
+    private void OnToastRequested(string message)
+    {
+        _ = ShowToastUiAsync(message);
+    }
+
+    private async Task ShowToastUiAsync(string message)
+    {
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            _toastBorder ??= this.FindControl<Border>("PART_Toast");
+            _toastText ??= this.FindControl<TextBlock>("PART_ToastText");
+            if (_toastBorder is null || _toastText is null) return;
+
+            _toastCts?.Cancel();
+            _toastCts = new CancellationTokenSource();
+            var ct = _toastCts.Token;
+
+            _toastText.Text = message;
+            _toastBorder.IsVisible = true;
+            try
+            {
+                await Task.Delay(2400, ct);
+                if (!ct.IsCancellationRequested)
+                    _toastBorder.IsVisible = false;
+            }
+            catch (TaskCanceledException) { }
+        });
     }
 
     private async void OnExtraArgsKeyDown(object? sender, KeyEventArgs e)
@@ -214,6 +279,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnModelEditorBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // Click outside the modal closes the editor (list-first UX).
+        if (DataContext is MainViewModel vm)
+        {
+            e.Handled = true;
+            if (vm.CloseModelEditorCommand is ICommand cmd && cmd.CanExecute(null))
+                cmd.Execute(null);
+        }
+    }
+
     private void OnModelItemClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel vm && sender is Border border && border.DataContext is ModelEditItem model)
@@ -248,58 +324,378 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnMoveModelUpClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (DataContext is MainViewModel vm && sender is Button button && button.DataContext is ModelEditItem model)
+            vm.MoveModel(model, -1);
+    }
+
+    private void OnMoveModelDownClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (DataContext is MainViewModel vm && sender is Button button && button.DataContext is ModelEditItem model)
+            vm.MoveModel(model, +1);
+    }
+
     private void OnCloneModelPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         e.Handled = true;
     }
 
-    private async void OnChooseModelClick(object? sender, RoutedEventArgs e)
+
+
+    
+    
+    // ── Model card reorder (custom pointer drag; no OS DnD — macOS crash safe) ─
+
+    private void OnModelCardPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Border border || border.DataContext is not ModelEditItem model)
+            return;
+        if (e.Source is Button || (e.Source as Control)?.FindAncestorOfType<Button>() is not null)
+            return;
+        if (!e.GetCurrentPoint(border).Properties.IsLeftButtonPressed)
+            return;
+
+        _reorderPressPoint = e.GetPosition(this);
+        _reorderPressInCard = e.GetPosition(border);
+        _reorderModel = model;
+        _reorderSourceBorder = border;
+        _reorderDragging = false;
+        e.Pointer.Capture(border);
+        e.Handled = true;
+    }
+
+    private void OnModelCardPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_reorderPressPoint is null || _reorderModel is null || _reorderSourceBorder is null)
+            return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            return;
+
+        var pos = e.GetPosition(this);
+        var dx = pos.X - _reorderPressPoint.Value.X;
+        var dy = pos.Y - _reorderPressPoint.Value.Y;
+
+        if (!_reorderDragging)
+        {
+            if ((dx * dx + dy * dy) < 64)
+                return;
+            BeginReorderGhost(_reorderSourceBorder, _reorderModel);
+            _reorderDragging = true;
+        }
+
+        MoveReorderGhost(pos);
+        UpdateDropHighlightAt(pos);
+        e.Handled = true;
+    }
+
+    private void OnModelCardPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        try
+        {
+            if (_reorderDragging && _reorderModel is not null && DataContext is MainViewModel vm)
+            {
+                var target = HitTestModelCard(e.GetPosition(this));
+                if (target?.DataContext is ModelEditItem targetModel)
+                    vm.ReorderModel(_reorderModel.ModelId, targetModel.ModelId);
+            }
+            else if (!_reorderDragging && _reorderModel is not null && DataContext is MainViewModel vm2)
+            {
+                var model = _reorderModel;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    try { vm2.ExecuteSelectModel(model); }
+                    catch (Exception ex) { vm2.ReportUiError($"Model selection failed: {ex.Message}"); }
+                }, DispatcherPriority.Background);
+            }
+        }
+        finally
+        {
+            EndReorderSession(e.Pointer);
+            e.Handled = true;
+        }
+    }
+
+    private void OnModelCardPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+        => EndReorderSession(null);
+
+    private void BeginReorderGhost(Border source, ModelEditItem model)
+    {
+        source.Opacity = 0.3;
+
+        var layer = this.FindControl<Canvas>("PART_DragGhostLayer");
+        if (layer is null)
+            return;
+
+        var w = source.Bounds.Width > 0 ? source.Bounds.Width : 300;
+        var h = source.Bounds.Height > 0 ? source.Bounds.Height : 80;
+
+        _reorderGhostBorder = new Border
+        {
+            Width = w,
+            Height = h,
+            CornerRadius = new CornerRadius(12),
+            Background = new SolidColorBrush(Color.Parse("#DD1E1E2E")),
+            BorderBrush = Brush("#89B4FA"),
+            BorderThickness = new Thickness(2),
+            Padding = new Thickness(12, 10),
+            IsHitTestVisible = false,
+            Child = new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = model.ModelId ?? "model",
+                        FontSize = 13,
+                        FontWeight = FontWeight.Bold,
+                        Foreground = Brush("#CDD6F4")
+                    },
+                    new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(model.Name) ? " " : model.Name!,
+                        FontSize = 11,
+                        Foreground = Brush("#A6ADC8"),
+                        TextTrimming = TextTrimming.CharacterEllipsis
+                    }
+                }
+            }
+        };
+
+        layer.Children.Clear();
+        layer.Children.Add(_reorderGhostBorder);
+        layer.IsVisible = true;
+    }
+
+    private void MoveReorderGhost(Point windowPos)
+    {
+        if (_reorderGhostBorder is null) return;
+        Canvas.SetLeft(_reorderGhostBorder, windowPos.X - _reorderPressInCard.X);
+        Canvas.SetTop(_reorderGhostBorder, windowPos.Y - _reorderPressInCard.Y);
+    }
+
+    private void UpdateDropHighlightAt(Point windowPos)
+    {
+        var target = HitTestModelCard(windowPos);
+        if (ReferenceEquals(target, _reorderSourceBorder))
+            target = null;
+
+        if (!ReferenceEquals(_modelDropHighlight, target))
+        {
+            ClearDropHighlight();
+            if (target is not null)
+            {
+                target.Classes.Add("model-card-drop-target");
+                _modelDropHighlight = target;
+            }
+        }
+    }
+
+    private Border? HitTestModelCard(Point windowPos)
+    {
+        if (this.InputHitTest(windowPos) is not Visual hit)
+            return null;
+
+        Control? c = hit as Control ?? hit.FindAncestorOfType<Control>();
+        while (c is not null)
+        {
+            if (c is Border b && b.Classes.Contains("model-card") && b.DataContext is ModelEditItem)
+                return b;
+            c = c.GetVisualParent() as Control;
+        }
+        return null;
+    }
+
+    private void EndReorderSession(IPointer? pointer)
+    {
+        if (_reorderSourceBorder is not null)
+        {
+            _reorderSourceBorder.Opacity = 1;
+            _reorderSourceBorder = null;
+        }
+
+        var layer = this.FindControl<Canvas>("PART_DragGhostLayer");
+        if (layer is not null)
+        {
+            layer.Children.Clear();
+            layer.IsVisible = false;
+        }
+        _reorderGhostBorder = null;
+        ClearDropHighlight();
+        _reorderPressPoint = null;
+        _reorderModel = null;
+        _reorderDragging = false;
+        pointer?.Capture(null);
+    }
+
+    private void ClearDropHighlight()
+    {
+        if (_modelDropHighlight is not null)
+        {
+            _modelDropHighlight.Classes.Remove("model-card-drop-target");
+            _modelDropHighlight = null;
+        }
+    }
+
+private async void OnChooseModelClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm || vm.SelectedModel is null)
             return;
 
+        var bg = Brush("#0F0F18");
+        var surface = Brush("#161622");
+        var border = Brush("#252536");
+        var text = Brush("#CDD6F4");
+        var muted = Brush("#6C7086");
+        var accent = Brush("#89B4FA");
+
         var dialog = new Window
         {
-            Title = "Choose GGUF model",
-            Width = 820,
-            Height = 640,
+            Title = "Choose model",
+            Width = 860,
+            Height = 680,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = true
+            CanResize = true,
+            Background = bg
         };
 
-        var queryBox = new TextBox { PlaceholderText = "Search Hugging Face GGUF repos, e.g. Qwen3.6 Q4_K_M", Text = vm.HfSearchQuery };
+        // --- Header ---
+        var title = new TextBlock
+        {
+            Text = "Choose model source",
+            FontSize = 18,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = text
+        };
+        var closeX = new Button
+        {
+            Content = new TextBlock { Text = "✕", FontSize = 16, FontWeight = FontWeight.SemiBold, Foreground = text, HorizontalAlignment = HorizontalAlignment.Center },
+            Width = 36,
+            Height = 36,
+            Padding = new Thickness(0),
+            Background = surface,
+            BorderBrush = border,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        closeX.Click += (_, __) => dialog.Close();
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 16) };
+        DockPanel.SetDock(closeX, Dock.Right);
+        header.Children.Add(closeX);
+        header.Children.Add(title);
 
-        // --- Content area ---
-        var contentScroll = new ScrollViewer { Margin = new Avalonia.Thickness(0, 12, 0, 12), VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        var contentPanel = new StackPanel { Spacing = 6 };
+        // --- Local card ---
+        var browseButton = new Button
+        {
+            Content = "📁  Browse local .gguf…",
+            Padding = new Thickness(14, 9),
+            Background = surface,
+            BorderBrush = border,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Foreground = text
+        };
+        browseButton.Click += async (_, _) =>
+        {
+            var path = await PickGgufPathAsync();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                vm.SetLocalModelPath(path);
+                dialog.Close();
+            }
+        };
+        var localCard = new Border
+        {
+            Background = surface,
+            BorderBrush = border,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(16),
+            Margin = new Thickness(0, 0, 0, 14),
+            Child = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = "Local GGUF", FontWeight = FontWeight.SemiBold, Foreground = text },
+                    new TextBlock { Text = "Pick a file already on disk.", FontSize = 12, Foreground = muted },
+                    browseButton
+                }
+            }
+        };
+
+        // --- Search ---
+        var queryBox = new TextBox
+        {
+            PlaceholderText = "Search Hugging Face GGUF repos…",
+            Text = vm.HfSearchQuery,
+            MinHeight = 36,
+            Background = surface,
+            Foreground = text,
+            BorderBrush = border,
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10, 8)
+        };
+        var searchButton = new Button
+        {
+            Content = "🔍  Search",
+            Padding = new Thickness(14, 9),
+            MinHeight = 36,
+            Background = Brush("#1B3A2A"),
+            Foreground = Brush("#A6E3A1"),
+            BorderBrush = Brush("#2A4F38"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8)
+        };
+        var searchRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
+        searchRow.Children.Add(queryBox);
+        Grid.SetColumn(searchButton, 1);
+        searchRow.Children.Add(searchButton);
+
+        var contentScroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Margin = new Thickness(0, 12, 0, 12)
+        };
+        var contentPanel = new StackPanel { Spacing = 8 };
         contentScroll.Content = contentPanel;
 
-        // --- Status (always in footer) ---
-        var status = new TextBlock { Text = "Choose a local .gguf file or search Hugging Face GGUF repositories.", Foreground = Avalonia.Media.Brushes.Gray };
-
-        // --- Search results panel ---
-        var searchResultsPanel = new StackPanel { Spacing = 6 };
-
-        // --- Quantization selection area (hidden until a repo is selected) ---
-        var quantTitle = new TextBlock { Text = "Select quantization", FontWeight = Avalonia.Media.FontWeight.Bold, Foreground = Avalonia.Media.Brushes.White, FontSize = 14 };
-        var quantScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 200 };
-        var quantList = new StackPanel { Spacing = 4 };
-        quantScroll.Content = quantList;
-
-        async System.Threading.Tasks.Task SearchAsync()
+        var status = new TextBlock
         {
-            // Reset UI: show search results panel + quantization area (hidden)
-            contentPanel.Children.Clear();
-            contentPanel.Children.Add(searchResultsPanel);
-            contentPanel.Children.Add(quantTitle);
-            contentPanel.Children.Add(quantScroll);
-            quantScroll.IsVisible = false;
-            searchResultsPanel.Children.Clear();
-            quantList.Children.Clear();
+            Text = "Search a repo, then pick a GGUF file (quant optional).",
+            Foreground = muted,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var cancelButton = new Button
+        {
+            Content = "Cancel",
+            Padding = new Thickness(14, 8),
+            IsCancel = true,
+            Background = surface,
+            Foreground = text,
+            BorderBrush = border,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8)
+        };
+        cancelButton.Click += (_, __) => dialog.Close();
 
+        async Task SearchAsync()
+        {
+            contentPanel.Children.Clear();
             var query = queryBox.Text;
-            if (string.IsNullOrWhiteSpace(query)) return;
-            status.Text = "Searching...";
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                status.Text = "Type a search query first.";
+                return;
+            }
+            status.Text = "Searching Hugging Face…";
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
@@ -313,35 +709,41 @@ public partial class MainWindow : Window
                     var modelId = id.GetString();
                     if (string.IsNullOrWhiteSpace(modelId)) continue;
                     count++;
-                    var button = new Button
-                    {
-                        Content = modelId,
-                        HorizontalAlignment = HorizontalAlignment.Stretch,
-                        HorizontalContentAlignment = HorizontalAlignment.Left,
-                        Padding = new Avalonia.Thickness(12, 8)
-                    };
+
+                    var button = MakeListButton(modelId, text, surface, border);
                     button.Click += async (_, _) =>
                     {
-                        // Show loading indicator
-                        searchResultsPanel.Children.Clear();
-                        var loadingText = new TextBlock { Text = $"Loading quantizations for {modelId}...", Foreground = Avalonia.Media.Brushes.Gray, Margin = new Avalonia.Thickness(0, 8, 0, 8) };
-                        searchResultsPanel.Children.Add(loadingText);
-
+                        contentPanel.Children.Clear();
+                        contentPanel.Children.Add(new TextBlock
+                        {
+                            Text = $"Loading GGUF files in {modelId}…",
+                            Foreground = muted,
+                            Margin = new Thickness(0, 8)
+                        });
+                        status.Text = "Listing GGUF files…";
                         try
                         {
-                            using var http2 = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                            var treeUrl = $"https://huggingface.co/api/models/{modelId}/tree/main";
+                            using var http2 = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+                            // recursive tree so nested GGUFs are included
+                            var treeUrl = $"https://huggingface.co/api/models/{modelId}/tree/main?recursive=1";
                             var response = await http2.GetAsync(treeUrl);
                             if (!response.IsSuccessStatusCode)
                             {
-                                var body = await response.Content.ReadAsStringAsync();
-                                status.Text = $"Failed to load quantizations: {response.StatusCode} ({response.ReasonPhrase})";
-                                loadingText.Text = $"Error: {response.StatusCode} — {body}";
+                                // fallback non-recursive
+                                treeUrl = $"https://huggingface.co/api/models/{modelId}/tree/main";
+                                response = await http2.GetAsync(treeUrl);
+                            }
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                status.Text = $"Failed to list files: {response.StatusCode}";
+                                contentPanel.Children.Clear();
+                                contentPanel.Children.Add(new TextBlock { Text = status.Text, Foreground = Brush("#F38BA8") });
                                 return;
                             }
+
                             using var stream2 = await response.Content.ReadAsStreamAsync();
                             var treeJson = await JsonDocument.ParseAsync(stream2);
-                            var ggufFiles = new List<(string label, string filename)>();
+                            var ggufFiles = new List<(string display, string repoPath, string? quant)>();
 
                             foreach (var file in treeJson.RootElement.EnumerateArray())
                             {
@@ -350,158 +752,154 @@ public partial class MainWindow : Window
                                 if (string.IsNullOrWhiteSpace(path)) continue;
                                 if (!path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)) continue;
 
-                                var fileName = System.IO.Path.GetFileName(path);
+                                var fileName = Path.GetFileName(path);
                                 var quantLabel = ExtractQuantizationLabel(fileName);
-                                if (string.IsNullOrWhiteSpace(quantLabel)) continue;
-
-                                ggufFiles.Add((quantLabel, path));
+                                // Always include the file — quant is optional metadata
+                                var display = quantLabel is not null
+                                    ? $"{quantLabel}  ·  {path}"
+                                    : path;
+                                ggufFiles.Add((display, path, quantLabel));
                             }
 
-                            searchResultsPanel.Children.Clear();
-
+                            contentPanel.Children.Clear();
                             if (ggufFiles.Count == 0)
                             {
-                                searchResultsPanel.Children.Add(new TextBlock { Text = "No GGUF files found in this repository.", Foreground = Avalonia.Media.Brushes.Gray });
+                                contentPanel.Children.Add(new TextBlock
+                                {
+                                    Text = "No .gguf files found in this repository.",
+                                    Foreground = muted
+                                });
                                 status.Text = "No GGUF files found.";
                                 return;
                             }
 
-                            // Sort by quality preference: Q8 > Q6 > Q5 > Q4 > Q3 > Q2 > IQ...
-                            ggufFiles.Sort((a, b) => CompareQuantization(a.label, b.label));
-
-                            // Show repo name as header
-                            searchResultsPanel.Children.Add(new TextBlock
+                            // Sort: known quants first (quality order), then alphabetical by path
+                            ggufFiles.Sort((a, b) =>
                             {
-                                Text = modelId,
-                                FontWeight = Avalonia.Media.FontWeight.Bold,
-                                Foreground = Avalonia.Media.Brushes.White,
-                                FontSize = 14,
-                                Margin = new Avalonia.Thickness(0, 4, 0, 4)
+                                var cq = CompareQuantization(a.quant ?? "", b.quant ?? "");
+                                if (a.quant is null && b.quant is not null) return 1;
+                                if (a.quant is not null && b.quant is null) return -1;
+                                if (a.quant is not null && b.quant is not null)
+                                {
+                                    var c = CompareQuantization(a.quant, b.quant);
+                                    if (c != 0) return c;
+                                }
+                                return string.Compare(a.repoPath, b.repoPath, StringComparison.OrdinalIgnoreCase);
                             });
 
-                            // Show quantization buttons
-                            foreach (var (label, filename) in ggufFiles)
+                            contentPanel.Children.Add(new TextBlock
                             {
-                                var qBtn = new Button
-                                {
-                                    Content = $"{label}  —  {filename}",
-                                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                                    HorizontalContentAlignment = HorizontalAlignment.Left,
-                                    Padding = new Avalonia.Thickness(12, 8),
-                                    Classes = { "quant-btn" }
-                                };
-                                qBtn.Click += (_, __) =>
-{
-    // Extract quantization label from filename (e.g., "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf" -> "UD-Q4_K_XL")
-    var quantLabel = ExtractQuantizationLabel(filename);
-    if (string.IsNullOrWhiteSpace(quantLabel))
-    {
-        // Fallback to filename without extension if no pattern matched
-        quantLabel = System.IO.Path.GetFileNameWithoutExtension(filename);
-    }
-    vm.SetHfModelWithQuantization(modelId, quantLabel);
-    dialog.Close();
-};;
-                                searchResultsPanel.Children.Add(qBtn);
-                            }
+                                Text = modelId,
+                                FontWeight = FontWeight.SemiBold,
+                                Foreground = text,
+                                FontSize = 14,
+                                Margin = new Thickness(0, 0, 0, 8)
+                            });
+                            contentPanel.Children.Add(new TextBlock
+                            {
+                                Text = $"{ggufFiles.Count} GGUF file(s) — pick one (quant tag used when present).",
+                                Foreground = muted,
+                                FontSize = 12,
+                                Margin = new Thickness(0, 0, 0, 8)
+                            });
 
-                            status.Text = $"{ggufFiles.Count} quantization(s) found. Click one to select.";
+                            foreach (var (display, repoPath, quant) in ggufFiles)
+                            {
+                                var qBtn = MakeListButton(display, text, surface, border);
+                                qBtn.Click += (_, __) =>
+                                {
+                                    // Prefer quant tag for -hf repo:Q4_K_M; else store repo-relative path
+                                    var token = !string.IsNullOrWhiteSpace(quant) ? quant! : repoPath;
+                                    vm.SetHfModelWithQuantization(modelId, token);
+                                    dialog.Close();
+                                };
+                                contentPanel.Children.Add(qBtn);
+                            }
+                            status.Text = "Select a GGUF file.";
                         }
                         catch (Exception ex)
                         {
-                            status.Text = $"Failed to load quantizations: {ex.Message}";
-                            loadingText.Text = $"Error: {ex.Message}";
+                            status.Text = $"Failed to list files: {ex.Message}";
+                            contentPanel.Children.Clear();
+                            contentPanel.Children.Add(new TextBlock { Text = status.Text, Foreground = Brush("#F38BA8") });
                         }
                     };
-                    searchResultsPanel.Children.Add(button);
+                    contentPanel.Children.Add(button);
                 }
+
+                status.Text = count == 0
+                    ? "No GGUF repositories found."
+                    : $"{count} repo(s). Click one to list GGUF files.";
                 if (count == 0)
-                {
-                    searchResultsPanel.Children.Add(new TextBlock { Text = "No GGUF repositories found.", Foreground = Avalonia.Media.Brushes.Gray });
-                    status.Text = "No GGUF repositories found.";
-                }
-                else
-                {
-                    status.Text = $"{count} result(s). Click one to see available quantizations.";
-                }
+                    contentPanel.Children.Add(new TextBlock { Text = "No GGUF repositories found.", Foreground = muted });
             }
             catch (Exception ex)
             {
                 status.Text = $"Search failed: {ex.Message}";
-                searchResultsPanel.Children.Add(new TextBlock { Text = $"Search failed: {ex.Message}", Foreground = Avalonia.Media.Brushes.Red });
+                contentPanel.Children.Add(new TextBlock { Text = status.Text, Foreground = Brush("#F38BA8") });
             }
         }
 
-        var browseButton = new Button { Content = "Browse local .gguf...", Padding = new Avalonia.Thickness(12, 8) };
-        browseButton.Click += async (_, _) =>
+        searchButton.Click += async (_, _) => await SearchAsync();
+        queryBox.KeyDown += async (_, ev) =>
         {
-            var path = await PickGgufPathAsync();
-            if (!string.IsNullOrWhiteSpace(path))
+            if (ev.Key == Key.Enter)
             {
-                vm.SetLocalModelPath(path);
+                ev.Handled = true;
+                await SearchAsync();
+            }
+        };
+
+        dialog.KeyDown += (_, ev) =>
+        {
+            if (ev.Key == Key.Escape)
+            {
+                ev.Handled = true;
                 dialog.Close();
             }
         };
 
-        var searchButton = new Button { Content = "Search", Padding = new Avalonia.Thickness(12, 8) };
-        searchButton.Click += async (_, _) => await SearchAsync();
-        queryBox.KeyDown += async (_, ev) =>
-        {
-            if (ev.Key == Avalonia.Input.Key.Enter)
-                await SearchAsync();
-        };
-
-        var titleBlock = new TextBlock { Text = "Choose model source", FontSize = 20, FontWeight = Avalonia.Media.FontWeight.Bold };
-
-        var localBorder = new Border
-        {
-            Margin = new Avalonia.Thickness(0, 16, 0, 12),
-            Padding = new Avalonia.Thickness(14),
-            Background = Avalonia.Media.Brushes.Transparent,
-            BorderThickness = new Avalonia.Thickness(1),
-            BorderBrush = Avalonia.Media.Brushes.Gray,
-            CornerRadius = new Avalonia.CornerRadius(8),
-            Child = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    new TextBlock { Text = "Local GGUF file", FontWeight = Avalonia.Media.FontWeight.Bold },
-                    browseButton
-                }
-            }
-        };
-        Grid.SetRow(localBorder, 1);
-
-        var searchGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
-        searchGrid.Children.Add(queryBox);
-        Grid.SetColumn(searchButton, 1);
-        searchGrid.Children.Add(searchButton);
-        Grid.SetRow(searchGrid, 2);
-
-        Grid.SetRow(contentScroll, 3);
-
-        var cancelButton = new Button { Content = "Cancel", IsCancel = true, Padding = new Avalonia.Thickness(12, 8) };
-        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 8, 0, 0) };
         footer.Children.Add(status);
         Grid.SetColumn(cancelButton, 1);
         footer.Children.Add(cancelButton);
-        Grid.SetRow(footer, 4);
 
-        var rootGrid = new Grid
+        var root = new Grid
         {
-            Margin = new Avalonia.Thickness(20),
+            Margin = new Thickness(22),
             RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,Auto")
         };
-        rootGrid.Children.Add(titleBlock);
-        rootGrid.Children.Add(localBorder);
-        rootGrid.Children.Add(searchGrid);
-        rootGrid.Children.Add(contentScroll);
-        rootGrid.Children.Add(footer);
-        dialog.Content = rootGrid;
+        root.Children.Add(header);
+        Grid.SetRow(localCard, 1);
+        root.Children.Add(localCard);
+        Grid.SetRow(searchRow, 2);
+        root.Children.Add(searchRow);
+        Grid.SetRow(contentScroll, 3);
+        root.Children.Add(contentScroll);
+        Grid.SetRow(footer, 4);
+        root.Children.Add(footer);
 
+        dialog.Content = root;
         await dialog.ShowDialog(this);
     }
+
+    private static IBrush Brush(string hex) =>
+        SolidColorBrush.Parse(hex);
+
+    private static Button MakeListButton(string content, IBrush foreground, IBrush background, IBrush borderBrush) =>
+        new Button
+        {
+            Content = content,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(12, 10),
+            Margin = new Thickness(0, 0, 0, 4),
+            Background = background,
+            Foreground = foreground,
+            BorderBrush = borderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8)
+        };
 
 
     /// <summary>
@@ -703,6 +1101,7 @@ public partial class MainWindow : Window
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        WireToastFromViewModel();
         SubscribeToViewModel(DataContext as MainViewModel);
     }
 

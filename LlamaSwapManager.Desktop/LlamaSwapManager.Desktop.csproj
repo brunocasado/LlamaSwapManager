@@ -7,12 +7,17 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <AssemblyTitle>Llama Swap Manager</AssemblyTitle>
+    <Product>Llama Swap Manager</Product>
+    <ApplicationTitle>Llama Swap Manager</ApplicationTitle>
   </PropertyGroup>
 
   <!-- macOS: informa o .app bundle qual icone usar no Dock / Cmd+Tab.
         O SDK do .NET gera um Info.plist automaticamente e inclui este campo. -->
    <PropertyGroup Condition="$([System.OperatingSystem]::IsMacOS())">
       <CFBundleIconFile>icon</CFBundleIconFile>
+      <CFBundleName>Llama Swap Manager</CFBundleName>
+      <CFBundleDisplayName>Llama Swap Manager</CFBundleDisplayName>
     </PropertyGroup>
 
   <ItemGroup>
@@ -76,7 +81,7 @@
 
            <!-- Generate Info.plist -->
            <WriteLinesToFile File="$(AppBundleContents)/Info.plist"
-                             Lines="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#x0D;&#x0A;&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;&#x0D;&#x0A;&lt;plist version=&quot;1.0&quot;&gt;&#x0D;&#x0A;&lt;dict&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleName&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;$(AssemblyName)&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleDisplayName&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;$(AssemblyName)&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleIdentifier&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;me.brunocasado.llamaswapmanager&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleVersion&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;1.0.0&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleShortVersionString&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;1.0.0&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundlePackageType&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;APPL&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleExecutable&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;run.sh&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleIconFile&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;icon&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;NSHighResolutionCapable&lt;/key&gt;&#x0D;&#x0A;    &lt;true/&gt;&#x0D;&#x0A;&lt;/dict&gt;&#x0D;&#x0A;&lt;/plist&gt;"
+                             Lines="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;&#x0D;&#x0A;&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;&#x0D;&#x0A;&lt;plist version=&quot;1.0&quot;&gt;&#x0D;&#x0A;&lt;dict&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleName&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;Llama Swap Manager&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleDisplayName&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;Llama Swap Manager&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleIdentifier&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;me.brunocasado.llamaswapmanager&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleVersion&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;1.0.0&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleShortVersionString&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;1.0.0&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundlePackageType&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;APPL&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleExecutable&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;run.sh&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;CFBundleIconFile&lt;/key&gt;&#x0D;&#x0A;    &lt;string&gt;icon&lt;/string&gt;&#x0D;&#x0A;    &lt;key&gt;NSHighResolutionCapable&lt;/key&gt;&#x0D;&#x0A;    &lt;true/&gt;&#x0D;&#x0A;&lt;/dict&gt;&#x0D;&#x0A;&lt;/plist&gt;"
                              Overwrite="true" />
 
               <!-- Make run.sh executable -->
