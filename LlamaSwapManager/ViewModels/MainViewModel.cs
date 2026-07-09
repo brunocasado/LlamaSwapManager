@@ -1575,20 +1575,29 @@ public partial class MainViewModel : ObservableObject
             }
             catch { }
 
-            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            try
             {
-                // Signal window that nested Closing must complete (no re-hide to tray).
-                // Use reflection-free duck typing via dynamic only on MainWindow-like surface:
-                try
+                if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
                 {
-                    var win = desktop.MainWindow;
-                    var beginExit = win?.GetType().GetMethod("BeginExit");
-                    beginExit?.Invoke(win, null);
-                }
-                catch { }
+                    // Let window Closing complete (do not re-hide to tray).
+                    try
+                    {
+                        var win = desktop.MainWindow;
+                        win?.GetType().GetMethod("BeginExit")?.Invoke(win, null);
+                    }
+                    catch { }
 
-                desktop.Shutdown();
+                    desktop.Shutdown(0);
+                }
             }
+            catch (Exception ex)
+            {
+                OnLogMessage($"[ui] desktop.Shutdown failed: {ex.Message}");
+            }
+
+            // Hard guarantee: Avalonia/tray can leave the process alive after Shutdown.
+            // Window X still only hides — this runs ONLY on explicit Quit.
+            try { Environment.Exit(0); } catch { }
         }
     }
 

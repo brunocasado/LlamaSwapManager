@@ -37,7 +37,7 @@ public partial class App : Application
             SetupTrayIcon(mainWindow, vm);
 
             // macOS menu Quit / Cmd+Q raises ShutdownRequested before windows close.
-            // Cancel + route through the same stop+shutdown as tray Quit / window X.
+            // Cancel + route through the same stop+shutdown as tray Quit (window X only hides to tray).
             desktop.ShutdownRequested += async (_, e) =>
             {
                 if (mainWindow.IsExiting)

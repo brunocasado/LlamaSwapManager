@@ -35,10 +35,10 @@ public partial class MainWindow : Window
     }
 
     private bool _isExiting;
-    private bool _quitInFlight;
 
     /// <summary>
-    /// Called by tray Quit / App exit paths so Closing is allowed to complete and the process ends.
+    /// Tray Quit / Cmd+Q path: allows Closing to complete so the process can shut down.
+    /// Window X does NOT call this — it only hides to tray.
     /// </summary>
     public void BeginExit()
     {
@@ -47,39 +47,15 @@ public partial class MainWindow : Window
 
     public bool IsExiting => _isExiting;
 
-    private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
-        // Already marked for shutdown (nested Closing from desktop.Shutdown()).
+        // Real app exit (tray Quit / Cmd+Q after BeginExit + Shutdown).
         if (_isExiting)
             return;
 
-        // Window X / Cmd+Win close: cancel this close, stop processes, then true exit.
+        // Title-bar X: hide to tray, keep process alive.
         e.Cancel = true;
-        if (_quitInFlight)
-            return;
-
-        _quitInFlight = true;
-        try
-        {
-            if (DataContext is MainViewModel vm)
-            {
-                // QuitApplicationAsync always ends with desktop.Shutdown().
-                // BeginExit() is applied in App tray path or just before that Shutdown
-                // so the re-entrant Closing is not cancelled/hidden.
-                await vm.QuitApplicationAsync();
-            }
-            else if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-            {
-                BeginExit();
-                desktop.Shutdown();
-            }
-        }
-        catch
-        {
-            BeginExit();
-            if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-                desktop.Shutdown();
-        }
+        this.Hide();
     }
 
     private static bool IsCopyGesture(KeyEventArgs e)
