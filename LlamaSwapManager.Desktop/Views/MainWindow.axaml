@@ -194,68 +194,90 @@
                 </Border>
                 <ScrollViewer Grid.Row="1" Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                   <StackPanel Spacing="16" Margin="0,0,0,24">
-<!-- Basic info -->
-                    <Border Padding="16" Background="#161622" CornerRadius="8">
-                      <StackPanel Spacing="12">
-                        <TextBlock Text="Basic Info" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                        <Grid ColumnDefinitions="160,*" RowSpacing="10">
+
+                    <!-- ESSENTIALS (always visible) -->
+                    <Border Classes="card" Padding="16">
+                      <StackPanel Spacing="14">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="Essentials" FontSize="14" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                          <TextBlock Text="What you usually change. Advanced knobs live in the sections below." FontSize="11" Foreground="#6C7086" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="160,*,160,*" RowSpacing="12" ColumnSpacing="12">
                           <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                           </Grid.RowDefinitions>
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Model ID" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ModelId}" PlaceholderText="e.g., mellum2-12b" />
 
-                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Display Name" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedModel.Name}" PlaceholderText="e.g., Mellum 2 12B" />
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Model ID" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.ModelId}" PlaceholderText="e.g. qwen2.5-14b"/>
+                          <TextBlock Grid.Row="0" Grid.Column="2" Text="Display Name" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding SelectedModel.Name}" PlaceholderText="Friendly label"/>
 
-                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Description" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                          <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.Description}" PlaceholderText="Optional" />
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Model Source" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0" Text="{Binding SelectedModelSourceLabel}" IsReadOnly="True"/>
+                            <Button Grid.Column="1" Content="Choose…" Click="OnChooseModelClick" Classes="ghost" Padding="12,6"/>
+                          </Grid>
 
-                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Aliases" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                          <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedModel.AliasesText}" PlaceholderText="mel, mellum (comma-separated)" />
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Server Path" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding SelectedModel.LlamaServerPath}" PlaceholderText="/path/to/llama-server"/>
+
+                          <TextBlock Grid.Row="3" Grid.Column="0" Text="Context Size" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding SelectedModel.ContextSize}" PlaceholderText="0 = model default" ToolTip.Tip="--ctx-size"/>
+                          <TextBlock Grid.Row="3" Grid.Column="2" Text="GPU Layers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Row="3" Grid.Column="3"
+                                    ItemsSource="{Binding GpuLayersOptions}"
+                                    SelectedItem="{Binding SelectedModel.GpuLayers}"
+                                    IsEditable="True"
+                                    PlaceholderText="auto | all | 0 | N"
+                                    ToolTip.Tip="--gpu-layers / -ngl"/>
+
+                          <TextBlock Grid.Row="4" Grid.Column="0" Text="Reasoning" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <ComboBox Grid.Row="4" Grid.Column="1"
+                                    ItemsSource="{Binding ReasoningOptions}"
+                                    SelectedItem="{Binding SelectedModel.Reasoning}"
+                                    ToolTip.Tip="--reasoning: off is explicit in config"/>
+                          <TextBlock Grid.Row="4" Grid.Column="2" Text="TTL (s)" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="4" Grid.Column="3" Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never"/>
                         </Grid>
+
+                        <StackPanel Orientation="Horizontal" Spacing="16">
+                          <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="jinja chat template engine" Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="--fit on" Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.NoMmap}" Content="--no-mmap" Foreground="#CDD6F4"/>
+                        </StackPanel>
                       </StackPanel>
                     </Border>
 
-                    <!-- Server config -->
-                    <Border Padding="16" Background="#161622" CornerRadius="8">
-                      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*">
-                        <StackPanel Grid.Row="0" Spacing="12">
-                          <TextBlock Text="llama-server" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Server Path" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.LlamaServerPath}" PlaceholderText="/path/to/llama-server" />
+                    <!-- Metadata (collapsed) -->
+                    <Expander Header="Name · description · aliases · host/port" IsExpanded="False" Margin="0,4,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="16">
+                        <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
+                          <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                          </Grid.RowDefinitions>
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="Description" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding SelectedModel.Description}" PlaceholderText="Optional"/>
+                          <TextBlock Grid.Row="1" Grid.Column="0" Text="Aliases" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding SelectedModel.AliasesText}" PlaceholderText="short names, comma-separated"/>
+                          <TextBlock Grid.Row="2" Grid.Column="0" Text="Host" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding SelectedModel.Host}" PlaceholderText="127.0.0.1"/>
+                          <TextBlock Grid.Row="2" Grid.Column="2" Text="Port" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center"/>
+                          <TextBox Grid.Row="2" Grid.Column="3" Text="{Binding SelectedModel.Port}" PlaceholderText="${PORT}"/>
+                        </Grid>
+                      </Border>
+                    </Expander>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Model Source" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                            <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                              <TextBox Grid.Column="0" Text="{Binding SelectedModelSourceLabel}" IsReadOnly="True" />
-                              <Button Grid.Column="1" Content="Choose model..." Click="OnChooseModelClick" Padding="12,5" />
-                            </Grid>
-
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Host / Port" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                            <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,160" ColumnSpacing="10">
-                              <TextBox Grid.Column="0" Text="{Binding SelectedModel.Host}" PlaceholderText="127.0.0.1" />
-                              <TextBox Grid.Column="1" Text="{Binding SelectedModel.Port}" PlaceholderText="${PORT}" />
-                            </Grid>
-                          </Grid>
-                        </StackPanel>
-
-                      </Grid>
-                    </Border>
-
-                    <!-- Guided llama-server parameter slides -->
-                    <Border Padding="16" Background="#161622" CornerRadius="8">
-                      <StackPanel Spacing="12">
-                        <TextBlock Text="llama-server Parameters" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                        <TextBlock Text="Tune runtime, memory, sampling, API, and chat options." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
-
-                        <TabControl Background="#161622" BorderBrush="#252536">
-                          <TabItem Header="1. Runtime">
-                            <StackPanel Margin="12" Spacing="12">
-                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                    <Expander Header="Runtime · batch · threads" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="12">
                               <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Context Size" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
@@ -277,11 +299,14 @@
                                 </Grid>
                               </Expander>
                             </StackPanel>
-                          </TabItem>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                          <TabItem Header="2. GPU / Memory">
-                            <StackPanel Margin="12" Spacing="12">
-                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                    <Expander Header="GPU · memory · devices" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="12">
                               <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="GPU Layers" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
@@ -314,11 +339,14 @@
                                 </Grid>
                               </Expander>
                             </StackPanel>
-                          </TabItem>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                          <TabItem Header="3. KV / Cache">
-                            <StackPanel Margin="12" Spacing="12">
-                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                    <Expander Header="KV cache" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="12">
                               <TextBlock Text="Leave empty for defaults." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
                               <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Cache Type K" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
@@ -330,11 +358,14 @@
                                 <TextBlock Margin="0,8,0,0" Text="Other cache flags go in Advanced." FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
                               </Expander>
                             </StackPanel>
-                          </TabItem>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                          <TabItem Header="4. Sampling">
-                            <StackPanel Margin="12" Spacing="12">
-                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                    <Expander Header="Sampling" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="12">
                               <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Temperature" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
@@ -368,11 +399,14 @@
                                 </StackPanel>
                               </Expander>
                             </StackPanel>
-                          </TabItem>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                          <TabItem Header="5. Server / API">
-                            <StackPanel Margin="12" Spacing="12">
-                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                    <Expander Header="Server · API · endpoints" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="12">
                               <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Parallel Slots" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
@@ -400,11 +434,14 @@
                                 </Grid>
                               </Expander>
                             </StackPanel>
-                          </TabItem>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                          <TabItem Header="6. Chat">
-                            <StackPanel Margin="12" Spacing="12">
-                              <TextBlock Text="Basic" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" />
+                    <Expander Header="Chat template · reasoning format" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="12">
                               <Grid ColumnDefinitions="160,*,160,*" RowSpacing="10" ColumnSpacing="12">
                                 <Grid.RowDefinitions>
                                   <RowDefinition Height="Auto"/>
@@ -458,10 +495,14 @@
                                 </Grid>
                               </Expander>
                             </StackPanel>
-                          </TabItem>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                          <TabItem Header="7. Advanced">
-                            <StackPanel Margin="12" Spacing="10">
+                    <Expander Header="Raw flags (power users)" IsExpanded="False" Margin="0,2,0,0">
+                      <Border Classes="card" Margin="0,8,0,0" Padding="14">
+                        <StackPanel Spacing="10">
+<StackPanel Margin="12" Spacing="10">
                               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                                 <TextBlock Grid.Column="0" Text="Raw llama-server flags." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" VerticalAlignment="Center" />
                                 <Button Grid.Column="1" Content="Copy" Click="OnCopyExtraArgsClick" ToolTip.Tip="Copy only these raw flags." />
@@ -476,21 +517,11 @@
                                        GotFocus="OnExtraArgsGotFocus"
                                        PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf --lora adapter.gguf" />
                             </StackPanel>
-                          </TabItem>
-                        </TabControl>
-                      </StackPanel>
-                    </Border>
+                        </StackPanel>
+                      </Border>
+                    </Expander>
 
-                    <!-- TTL -->
-                    <Border Padding="16" Background="#161622" CornerRadius="8">
-                      <StackPanel Spacing="10">
-                        <TextBlock Text="llama-swap TTL (auto-unload)" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                        <Grid ColumnDefinitions="160,*" RowSpacing="10">
-                          <TextBlock Grid.Row="0" Grid.Column="0" Text="TTL seconds" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never" HorizontalAlignment="Left" Width="160" />
-                        </Grid>
-                      </StackPanel>
-                    </Border>
+
                   
                   </StackPanel>
                 </ScrollViewer>
