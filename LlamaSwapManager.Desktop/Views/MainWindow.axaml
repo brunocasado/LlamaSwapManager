@@ -467,6 +467,8 @@
                   <ScrollViewer Grid.Row="1" x:Name="UpstreamLogScrollViewer"
                                VerticalScrollBarVisibility="Auto"
                                HorizontalScrollBarVisibility="Auto">
+                    <!-- Disable TextBox's inner ScrollViewer so only the outer one owns scroll
+                         state — required for reliable stick-to-bottom autoscroll. -->
                     <TextBox x:Name="UpstreamLogTextBox"
                              Text="{Binding UpstreamLogText}"
                              Background="#101018"
@@ -475,29 +477,48 @@
                              TextWrapping="NoWrap"
                              FontFamily="Consolas, monospace"
                              FontSize="11"
-                             AcceptsReturn="True" />
+                             AcceptsReturn="True"
+                             BorderThickness="0"
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
                   </ScrollViewer>
 
                   <!-- Jump-to-bottom when user has scrolled up -->
                   <Button x:Name="ScrollToBottomButton"
-                          Content="↓"
                           ToolTip.Tip="Jump to latest logs"
                           HorizontalAlignment="Right"
                           VerticalAlignment="Bottom"
-                          Margin="0,0,16,16"
+                          Margin="0,0,18,18"
                           Width="36"
                           Height="36"
-                          FontSize="16"
-                          FontWeight="Bold"
-                          Foreground="#CDD6F4"
-                          Background="#45475A"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Background="#313244"
                           BorderBrush="#89B4FA"
-                          BorderThickness="1"
+                          BorderThickness="1.5"
                           CornerRadius="18"
-                          Opacity="0.92"
+                          Opacity="0.95"
+                          Cursor="Hand"
                           IsVisible="False"
                           Click="OnScrollToBottomClick"
-                          ZIndex="10" />
+                          ZIndex="10">
+                    <!-- Vector double-chevron — optically centered (unicode ↓ sits high in glyph box) -->
+                    <Viewbox Width="14" Height="14" Stretch="Uniform">
+                      <Canvas Width="24" Height="24">
+                        <Path Stroke="#CDD6F4"
+                              StrokeThickness="2.4"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"
+                              Data="M 6,6 L 12,12 L 18,6" />
+                        <Path Stroke="#CDD6F4"
+                              StrokeThickness="2.4"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"
+                              Data="M 6,12 L 12,18 L 18,12" />
+                      </Canvas>
+                    </Viewbox>
+                  </Button>
                 </Grid>
               </Grid>
             </Border>
