@@ -753,7 +753,7 @@ public partial class MainViewModel : ObservableObject
         var j = i + delta;
         if (j < 0 || j >= Models.Count) return;
         Models.Move(i, j);
-        PersistConfigToDisk("Model order updated.");
+        PersistConfigToDisk(silent: true);
     }
 
     /// <summary>Move <paramref name="sourceId"/> to the index of <paramref name="targetId"/> (insert before target).</summary>
@@ -772,7 +772,7 @@ public partial class MainViewModel : ObservableObject
         if (from < 0 || to < 0 || from == to) return;
 
         Models.Move(from, to);
-        PersistConfigToDisk("Model order updated.");
+        PersistConfigToDisk(silent: true);
     }
 
     public void ExecuteSelectModel(ModelEditItem model)
@@ -1297,12 +1297,13 @@ public partial class MainViewModel : ObservableObject
         finally { _matrixSyncDepth--; }
     }
 
-    private void PersistConfigToDisk(string successMessage)
+    private void PersistConfigToDisk(string? successMessage = null, bool silent = false)
     {
         var configPath = !string.IsNullOrWhiteSpace(ConfigFilePath) ? ConfigFilePath : _processManager.ConfigPath;
         if (string.IsNullOrWhiteSpace(configPath))
         {
-            ShowToast("Error: config.yml path is not set.");
+            if (!silent)
+                ShowToast("Error: config.yml path is not set.");
             return;
         }
 
@@ -1310,8 +1311,9 @@ public partial class MainViewModel : ObservableObject
         _configService.SaveConfig(config, configPath);
         _rawConfig = config;
         ConfigPreview = config.ToYaml();
-        // Toast for user feedback — do not hijack the top/runtime status chip.
-        ShowToast(successMessage);
+        // Never overwrite RUNTIME StatusText here — toast only (unless silent).
+        if (!silent && !string.IsNullOrWhiteSpace(successMessage))
+            ShowToast(successMessage);
     }
 
     private void SyncMatrixTextFromCollections()

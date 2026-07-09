@@ -340,7 +340,12 @@ public partial class MainWindow : Window
 
 
     
-    // ── Model card drag-reorder (Avalonia 12 DataTransfer API) ───────────
+    // ── Model card drag-reorder (in-process payload + ghost card) ─────────
+
+    private static readonly DataFormat<string> ModelIdFormat =
+        DataFormat.CreateInProcessFormat<string>("llamaswap-model-id");
+
+    private Border? _modelDragSource;
 
     private async void OnModelCardPointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -356,27 +361,55 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(id))
             return;
 
-        var transfer = new DataTransfer();
-        transfer.Add(DataTransferItem.CreateText(id));
+        // Ghost: fade the source card while dragging (feels like carrying the card).
+        _modelDragSource = border;
+        border.Opacity = 0.35;
+        border.RenderTransform = new TranslateTransform(0, -2);
+        border.ZIndex = 20;
 
-        var effect = await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
-        ClearDropHighlight();
-
-        // No successful drop → treat as click to open editor.
-        if (effect == DragDropEffects.None && DataContext is MainViewModel vm)
+        try
         {
-            Dispatcher.UIThread.Post(() =>
+            // In-process only — avoids the ugly system file/text drag icon.
+            var transfer = new DataTransfer();
+            transfer.Add(DataTransferItem.Create(ModelIdFormat, id));
+
+            var effect = await DragDrop.DoDragDropAsync(e, transfer, DragDropEffects.Move);
+            ClearDropHighlight();
+
+            // No successful drop → treat as click to open editor.
+            if (effect == DragDropEffects.None && DataContext is MainViewModel vm)
             {
-                try { vm.ExecuteSelectModel(model); }
-                catch (Exception ex) { vm.ReportUiError($"Model selection failed: {ex.Message}"); }
-            }, DispatcherPriority.Background);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    try { vm.ExecuteSelectModel(model); }
+                    catch (Exception ex) { vm.ReportUiError($"Model selection failed: {ex.Message}"); }
+                }, DispatcherPriority.Background);
+            }
+        }
+        finally
+        {
+            RestoreDragSourceVisual();
         }
     }
 
-    // Kept for XAML wire-up compatibility (drag starts on press via DoDragDropAsync).
     private void OnModelCardPointerMoved(object? sender, PointerEventArgs e) { }
     private void OnModelCardPointerReleased(object? sender, PointerReleasedEventArgs e) { }
-    private void OnModelCardPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e) => ClearDropHighlight();
+    private void OnModelCardPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        ClearDropHighlight();
+        RestoreDragSourceVisual();
+    }
+
+    private void RestoreDragSourceVisual()
+    {
+        if (_modelDragSource is not null)
+        {
+            _modelDragSource.Opacity = 1;
+            _modelDragSource.RenderTransform = null;
+            _modelDragSource.ZIndex = 0;
+            _modelDragSource = null;
+        }
+    }
 
     private void ClearDropHighlight()
     {
@@ -387,13 +420,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool IsModelDrag(IDataTransfer? dt) =>
+        dt is not null && dt.Contains(ModelIdFormat);
+
+    private static string? GetDraggedModelId(IDataTransfer? dt)
+    {
+        if (dt is null) return null;
+        return dt.TryGetValue(ModelIdFormat);
+    }
+
     private void OnModelCardDragOver(object? sender, DragEventArgs e)
     {
-        var dt = e.DataTransfer;
-        var ok = dt is not null && (dt.Contains(DataFormat.Text) || !string.IsNullOrEmpty(dt.TryGetText()));
+        var ok = IsModelDrag(e.DataTransfer);
         e.DragEffects = ok ? DragDropEffects.Move : DragDropEffects.None;
         if (ok && sender is Border border)
         {
+            // Don't highlight the card being dragged.
+            if (ReferenceEquals(border, _modelDragSource))
+            {
+                e.Handled = true;
+                return;
+            }
             if (!ReferenceEquals(_modelDropHighlight, border))
             {
                 ClearDropHighlight();
@@ -418,7 +465,7 @@ public partial class MainWindow : Window
         if (sender is not Border targetBorder || targetBorder.DataContext is not ModelEditItem target)
             return;
 
-        var sourceId = e.DataTransfer?.TryGetText();
+        var sourceId = GetDraggedModelId(e.DataTransfer);
         if (string.IsNullOrWhiteSpace(sourceId))
             return;
 

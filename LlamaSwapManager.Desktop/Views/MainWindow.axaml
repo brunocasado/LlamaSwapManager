@@ -129,7 +129,7 @@
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="4">
                   <TextBlock Text="Models" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                  <TextBlock Text="Profiles for llama-server. Drag cards (⠿) to reorder — order is saved to config.yml." FontSize="12" Foreground="#6C7086"/>
+                  <TextBlock Text="Profiles for llama-server. Click a card to edit." FontSize="12" Foreground="#6C7086"/>
                 </StackPanel>
                 <Button Grid.Column="1" Content="+ Add model" Command="{Binding AddModelCommand}"
                         Classes="success" Padding="14,8" VerticalAlignment="Center"
@@ -175,7 +175,7 @@
                       <Grid ColumnDefinitions="22,*">
                         <TextBlock Grid.Column="0" Text="⠿" FontSize="14" Foreground="#585B70"
                                    VerticalAlignment="Center" HorizontalAlignment="Center"
-                                   Margin="0,0,4,0" ToolTip.Tip="Drag to reorder"
+                                   Margin="0,0,4,0" 
                                    Classes="drag-grip"/>
                         <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
