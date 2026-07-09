@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows.Input;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -211,6 +212,17 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             if (DataContext is MainViewModel vm) vm.ReportUiError($"Paste failed: {ex.Message}");
+        }
+    }
+
+    private void OnModelEditorBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // Click outside the modal closes the editor (list-first UX).
+        if (DataContext is MainViewModel vm)
+        {
+            e.Handled = true;
+            if (vm.CloseModelEditorCommand is ICommand cmd && cmd.CanExecute(null))
+                cmd.Execute(null);
         }
     }
 
