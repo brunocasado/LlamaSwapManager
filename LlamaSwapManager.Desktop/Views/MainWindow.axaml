@@ -753,7 +753,16 @@
   
     
     
-    <!-- FULL-WINDOW MODEL EDITOR: centered form column, proportional * fields, label-above -->
+    
+    <!-- TOAST -->
+    <Border x:Name="PART_Toast" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Grid.RowSpan="2"
+            IsVisible="False" ZIndex="400" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+            Margin="0,0,0,36" Background="#1E1E2E" BorderBrush="#45475A" BorderThickness="1"
+            CornerRadius="12" Padding="18,12" BoxShadow="0 8 32 #66000000">
+      <TextBlock x:Name="PART_ToastText" Text="" FontSize="13" Foreground="#CDD6F4"/>
+    </Border>
+
+<!-- FULL-WINDOW MODEL EDITOR: centered form column, proportional * fields, label-above -->
     <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Grid.RowSpan="2"
           IsVisible="{Binding HasSelectedModel}" ZIndex="200">
       <Border Background="#C0000000" PointerPressed="OnModelEditorBackdropPressed"/>
@@ -767,8 +776,12 @@
         <Grid RowDefinitions="Auto,*,Auto">
           <Border Grid.Row="0" Padding="20,14" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="True">
-              <Button DockPanel.Dock="Right" Content="Close" Command="{Binding CloseModelEditorCommand}"
-                      Classes="ghost" Padding="14,7" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <Button DockPanel.Dock="Right" Command="{Binding CloseModelEditorCommand}"
+                      Classes="icon-close" Width="36" Height="36" Padding="0" Margin="12,0,0,0"
+                      VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                      ToolTip.Tip="Close (Esc)">
+                <TextBlock Text="✕" FontSize="16" FontWeight="SemiBold" Foreground="#CDD6F4" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Button>
               <StackPanel Spacing="2" VerticalAlignment="Center">
                 <TextBlock Text="EDIT MODEL" FontSize="10" FontWeight="Bold" Foreground="#585B70"/>
                 <TextBlock Text="{Binding SelectedModel.ModelId}" FontSize="17" FontWeight="SemiBold" Foreground="#CDD6F4"/>

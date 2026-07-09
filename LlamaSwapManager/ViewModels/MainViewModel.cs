@@ -709,6 +709,16 @@ public partial class MainViewModel : ObservableObject
         OnLogMessage($"[ui] {message}");
     }
 
+    /// <summary>Transient toast bubble (UI-only). Prefer this over StatusText for save/confirm feedback.</summary>
+    public event Action<string>? ToastRequested;
+
+    public void ShowToast(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        OnLogMessage($"[toast] {message}");
+        ToastRequested?.Invoke(message);
+    }
+
 
     private void CloseModelEditor()
     {
@@ -921,8 +931,10 @@ public partial class MainViewModel : ObservableObject
         IsNewModel = false;
         EnsureMatrixModelCoverage();
         SyncEvictCostsWithCurrentVars(refreshPreview: false);
-        PersistConfigToDisk("Model saved to config.yml!");
+        PersistConfigToDisk("Model saved.");
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        // Close the editor sheet after a successful save.
+        CloseModelEditor();
     }
 
     private void UpdateSelectedModelSourceLabel()
@@ -1007,20 +1019,64 @@ public partial class MainViewModel : ObservableObject
         StatusColor = "#A6E3A1";
     }
 
-    public void SetHfModelWithQuantization(string modelId, string quantizationFilename)
+    /// <summary>
+    /// Apply HF model selection. <paramref name="repoFileOrQuant"/> may be a quant tag
+    /// (Q4_K_M), a bare filename, or a repo-relative path (subdir/file.gguf).
+    /// Not every GGUF embeds a recognizable quant token — in that case we keep the file path.
+    /// </summary>
+    public void SetHfModelWithQuantization(string modelId, string repoFileOrQuant)
     {
         if (SelectedModel == null || string.IsNullOrWhiteSpace(modelId)) return;
         SelectedModel.HfModel = modelId;
         SelectedModel.ModelPath = "";
-        // Extract just the quantization label: filename without extension
-        // e.g., "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf" → "UD-Q4_K_XL"
-        var quantLabel = System.IO.Path.GetFileNameWithoutExtension(quantizationFilename);
-        SelectedModel.SelectedQuantization = quantLabel;
+
+        var raw = (repoFileOrQuant ?? string.Empty).Trim().Replace('\\', '/');
+        // Prefer known quant token from the leaf filename; otherwise keep relative path/filename for -hf repo:file
+        var leaf = Path.GetFileName(raw);
+        var quantFromName = ExtractQuantizationLabelForModel(leaf);
+        if (!string.IsNullOrWhiteSpace(quantFromName))
+            SelectedModel.SelectedQuantization = quantFromName;
+        else if (raw.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            SelectedModel.SelectedQuantization = raw; // path or filename without a standard quant tag
+        else if (!string.IsNullOrWhiteSpace(raw))
+            SelectedModel.SelectedQuantization = Path.GetFileNameWithoutExtension(raw);
+        else
+            SelectedModel.SelectedQuantization = "";
+
         HfSearchQuery = modelId;
         IsModelPickerOpen = false;
         UpdateSelectedModelSourceLabel();
-        StatusText = $"Hugging Face model selected ({quantLabel}).";
+        StatusText = string.IsNullOrWhiteSpace(SelectedModel.SelectedQuantization)
+            ? "Hugging Face model selected."
+            : $"Hugging Face model selected ({SelectedModel.SelectedQuantization}).";
         StatusColor = "#A6E3A1";
+    }
+
+    /// <summary>Shared quant extraction used by VM (mirrors UI helper patterns).</summary>
+    private static string? ExtractQuantizationLabelForModel(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var quantPatterns = new[]
+        {
+            "Q8_0","Q8_K","Q6_K","Q5_K_M","Q5_K_S","Q5_0","Q5_1",
+            "Q4_K_M","Q4_K_S","Q4_0","Q4_1","Q3_K_M","Q3_K_S","Q3_K_L",
+            "Q2_K","Q2_0","IQ4_XS","IQ4_NL","IQ3_XS","IQ3_S","IQ3_M",
+            "IQ2_XS","IQ2_S","IQ2_M","IQ1_S","IQ1_M",
+            "FP16","FP8_M","BF16","F32","F16","UD-Q4_K_XL","UD-Q5_K_XL","UD-Q6_K_XL","UD-Q8_K_XL"
+        };
+        foreach (var pattern in quantPatterns)
+        {
+            if (baseName.EndsWith(pattern, StringComparison.OrdinalIgnoreCase) ||
+                baseName.Contains("-" + pattern, StringComparison.OrdinalIgnoreCase) ||
+                baseName.Contains("_" + pattern, StringComparison.OrdinalIgnoreCase))
+                return pattern;
+        }
+        var match = System.Text.RegularExpressions.Regex.Match(
+            baseName,
+            @"[-_]((UD-)?[QIq][A-Za-z]*\d[\w_]*|FP\d+[A-Z_]*|BF\d+|F\d+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : null;
     }
 
     private void ApplyHfModel(string? modelId)
@@ -1224,8 +1280,8 @@ public partial class MainViewModel : ObservableObject
         _configService.SaveConfig(config, configPath);
         _rawConfig = config;
         ConfigPreview = config.ToYaml();
-        StatusText = successMessage;
-        StatusColor = "#A6E3A1";
+        // Toast for user feedback — do not hijack the top/runtime status chip.
+        ShowToast(successMessage);
     }
 
     private void SyncMatrixTextFromCollections()
