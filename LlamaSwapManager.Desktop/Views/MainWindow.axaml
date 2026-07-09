@@ -129,7 +129,7 @@
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="4">
                   <TextBlock Text="Models" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-                  <TextBlock Text="Profiles for llama-server. Click a card to edit — create flows stay modal." FontSize="12" Foreground="#6C7086"/>
+                  <TextBlock Text="Profiles for llama-server. Click a card to edit. Use ↑↓ to reorder (saved to config.yml)." FontSize="12" Foreground="#6C7086"/>
                 </StackPanel>
                 <Button Grid.Column="1" Content="+ Add model" Command="{Binding AddModelCommand}"
                         Classes="success" Padding="14,8" VerticalAlignment="Center"
@@ -152,7 +152,7 @@
               </StackPanel>
             </Border>
 
-            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16"
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16"
                           IsVisible="{Binding Models.Count, Converter={x:Static conv:CountToBoolConverter.Instance}}">
               <ItemsControl ItemsSource="{Binding Models}">
                 <ItemsControl.ItemsPanel>
@@ -167,9 +167,17 @@
                             Background="{Binding IsSelected, Converter={x:Static conv:SelectedModelBrushConverter.Instance}}">
                       <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ModelId}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                        <Button Grid.Row="0" Grid.Column="1" Content="Clone" Classes="ghost" Padding="8,3" FontSize="11"
-                                ToolTip.Tip="Clone for parameter experiments"
-                                PointerPressed="OnCloneModelPointerPressed" Click="OnCloneModelClick"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                          <Button Content="↑" Classes="ghost" Padding="6,2" FontSize="12"
+                                  ToolTip.Tip="Move earlier in config.yml"
+                                  PointerPressed="OnCloneModelPointerPressed" Click="OnMoveModelUpClick"/>
+                          <Button Content="↓" Classes="ghost" Padding="6,2" FontSize="12"
+                                  ToolTip.Tip="Move later in config.yml"
+                                  PointerPressed="OnCloneModelPointerPressed" Click="OnMoveModelDownClick"/>
+                          <Button Content="Clone" Classes="ghost" Padding="8,3" FontSize="11"
+                                  ToolTip.Tip="Clone for parameter experiments"
+                                  PointerPressed="OnCloneModelPointerPressed" Click="OnCloneModelClick"/>
+                        </StackPanel>
                         <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Name}" FontSize="12" Foreground="#A6ADC8" Margin="0,6,0,0"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding CmdPreview}" FontSize="11" Foreground="#6C7086" TextWrapping="Wrap" MaxHeight="48"  Margin="0,8,0,0"/>
                         <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,12,0,0">
@@ -194,20 +202,19 @@
         </Panel>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=matrix}">
 
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
+        <Grid RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
             <StackPanel Spacing="4">
               <TextBlock Text="Matrix" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-              <TextBlock Text="Model loading groups and eviction priority." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+              <TextBlock Text="Model loading groups and eviction priority. Changes save automatically to config.yml." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <Border Padding="8"><Border Padding="4">        <Grid RowDefinitions="Auto,*" Margin="20">
+          <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="20,12,20,20">
           <StackPanel Grid.Row="0" Spacing="12" Margin="0,0,0,12">
-            <TextBlock Text="Matrix Configuration" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
             <Border Padding="16" Background="#161622" BorderBrush="#313244" BorderThickness="1" CornerRadius="10">
               <StackPanel Spacing="6">
                 <TextBlock Text="Model loading groups and eviction priority" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                <TextBlock Text="Create combinations, then decide what unloads first. Matrix changes are saved automatically to config.yml." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+                <TextBlock Text="Create combinations, then decide what unloads first." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
           </StackPanel>
@@ -316,21 +323,19 @@
             </TabItem>
           </TabControl>
         </Grid>
-      
-          </Border></Border>
-        </DockPanel>
+        </Grid>
 
         </Panel>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=preview}">
 
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
+        <Grid RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
             <StackPanel Spacing="4">
               <TextBlock Text="Config preview" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
               <TextBlock Text="Read-only projection of the generated config.yml." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <Border Padding="8"><Border Padding="4">        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
           <StackPanel Spacing="16">
             <TextBlock Text="Generated config.yml" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
             <TextBlock Text="Preview before saving."
@@ -356,21 +361,19 @@
             </StackPanel>
           </StackPanel>
         </ScrollViewer>
-      
-          </Border></Border>
-        </DockPanel>
+        </Grid>
 
         </Panel>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=metrics}">
 
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
+        <Grid RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
             <StackPanel Spacing="4">
               <TextBlock Text="Metrics" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
               <TextBlock Text="Live llama-server KPIs and upstream logs." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <Border Padding="8"><Border Padding="4">        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="16">
+          <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="16,12,16,16">
           <!-- Header -->
           <Border Grid.Row="0" Padding="16" Background="#161622" CornerRadius="8" Margin="0,0,0,16">
             <StackPanel Spacing="6">
@@ -454,7 +457,7 @@
               <Grid RowDefinitions="Auto,*">
                 <TextBlock Grid.Row="0" Text="Upstream Logs" FontSize="12" FontWeight="Bold" Foreground="#A6E3A1" Margin="0,0,0,6" />
                 <Grid Grid.Row="1">
-                  <ScrollViewer x:Name="UpstreamLogScrollViewer"
+                  <ScrollViewer Grid.Row="1" x:Name="UpstreamLogScrollViewer"
                                VerticalScrollBarVisibility="Auto"
                                HorizontalScrollBarVisibility="Auto">
                     <TextBox x:Name="UpstreamLogTextBox"
@@ -498,22 +501,20 @@
             <TextBlock Text="Logs update in real-time. Upstream logs from llama-server via streaming API." FontSize="10" Foreground="#6C7086" />
           </Border>
         </Grid>
-      
-          </Border></Border>
-        </DockPanel>
+        </Grid>
 
         </Panel>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=settings}">
 
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
+        <Grid RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
             <StackPanel Spacing="4">
               <TextBlock Text="Settings" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
               <TextBlock Text="Paths, GPU backend and global runtime options." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <Border Padding="8"><Border Padding="4">        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-          <StackPanel Spacing="16">
+          <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="16" Margin="0,0,0,40">
             <!-- Paths -->
             <Border Padding="16" Background="#161622" CornerRadius="8">
               <StackPanel Spacing="12">
@@ -535,7 +536,7 @@
                              Fill="{Binding LlamaSwapExeAutoDetected, Converter={x:Static conv:BooleanToBrushConverter.Instance}}"
                              IsVisible="{Binding LlamaSwapExeAutoDetected}" />
                   </DockPanel>
-                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LlamaSwapExePath}"
+                  <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LlamaSwapExePath}" ToolTip.Tip="Path to the llama-swap binary used to start/stop the proxy."
                            PlaceholderText="/path/to/llama-swap" VerticalAlignment="Center" />
 
                   <DockPanel Grid.Row="1" Grid.Column="0" LastChildFill="False" VerticalAlignment="Center">
@@ -545,12 +546,12 @@
                              VerticalAlignment="Center" Fill="#A6E3A1"
                              IsVisible="{Binding ConfigFileAutoDetected}" />
                   </DockPanel>
-                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ConfigFilePath}"
+                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ConfigFilePath}" ToolTip.Tip="config.yml read/written by this app."
                            PlaceholderText="/path/to/config.yml" VerticalAlignment="Center" />
 
                   <TextBlock Grid.Row="2" Grid.Column="0" Text="llama-server Default" FontSize="12"
                              Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LlamaServerPath}"
+                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LlamaServerPath}" ToolTip.Tip="Default llama-server binary path used by new models."
                            PlaceholderText="/path/to/llama-server" VerticalAlignment="Center" />
                 </Grid>
               </StackPanel>
@@ -571,30 +572,30 @@
                   <TextBlock Grid.Row="0" Grid.Column="0" Text="Start Port (${PORT})" FontSize="12"
                              Foreground="#A6ADC8" VerticalAlignment="Center" />
                   <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
-                    <TextBox Text="{Binding StartPort}" Width="120" HorizontalAlignment="Left" />
+                    <TextBox Text="{Binding StartPort}" ToolTip.Tip="First port for ${PORT} expansion when spawning llama-server." Width="120" HorizontalAlignment="Left" />
                     <TextBlock Text="First llama-server port for ${PORT}." FontSize="10"
                                Foreground="#6C7086" TextWrapping="Wrap" />
                   </StackPanel>
 
                   <TextBlock Grid.Row="1" Grid.Column="0" Text="Health Check Timeout (s)" FontSize="12"
                              Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HealthCheckTimeout}"
+                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HealthCheckTimeout}" ToolTip.Tip="Seconds to wait for a model to become healthy after load."
                            Width="120" HorizontalAlignment="Left" />
 
                   <TextBlock Grid.Row="2" Grid.Column="0" Text="Log Level" FontSize="12"
                              Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LogLevel}"
+                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LogLevel}" ToolTip.Tip="llama-swap log verbosity (debug, info, warn, error)."
                            Width="150" HorizontalAlignment="Left" PlaceholderText="debug" />
 
                   <TextBlock Grid.Row="3" Grid.Column="0" Text="Global TTL (s)" FontSize="12"
                              Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding GlobalTtl}"
+                  <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding GlobalTtl}" ToolTip.Tip="Default idle TTL in seconds for models (0 = never unload)."
                            Width="120" HorizontalAlignment="Left" />
 
                   <TextBlock Grid.Row="4" Grid.Column="0" Text="Send Loading State" FontSize="12"
                              Foreground="#A6ADC8" VerticalAlignment="Center" />
                   <CheckBox Grid.Row="4" Grid.Column="1"
-                            IsChecked="{Binding SendLoadingState}"
+                            IsChecked="{Binding SendLoadingState}" ToolTip.Tip="When on, streams loading progress to clients while a model is loading."
                             Content="Inject loading updates into streaming responses while a model is loading"
                             Foreground="#CDD6F4"
                             VerticalAlignment="Center" />
@@ -613,7 +614,7 @@
                     <RowDefinition Height="Auto"/>
                   </Grid.RowDefinitions>
                   <TextBlock Grid.Row="0" Grid.Column="0" Text="Preferred Backend" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding GpuBackendOptions}" SelectedItem="{Binding SelectedGpuBackend}" />
+                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding GpuBackendOptions}" SelectedItem="{Binding SelectedGpuBackend}" ToolTip.Tip="Preferred GPU backend for downloaded llama.cpp builds." />
                   <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding GpuDetectionStatus}" FontSize="11" Foreground="{Binding GpuDetectionStatusColor}" />
                 </Grid>
               </StackPanel>
@@ -629,7 +630,7 @@
                     <RowDefinition Height="Auto"/>
                   </Grid.RowDefinitions>
                   <TextBlock Grid.Row="0" Grid.Column="0" Text="CUDA Version" FontSize="12" Foreground="#A6ADC8" VerticalAlignment="Center" />
-                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CudaVersionOptions}" SelectedItem="{Binding CudaVersion}" />
+                  <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding CudaVersionOptions}" SelectedItem="{Binding CudaVersion}" ToolTip.Tip="CUDA toolkit major version bundled with the llama.cpp download." />
                 </Grid>
               </StackPanel>
             </Border>
@@ -646,21 +647,19 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-      
-          </Border></Border>
-        </DockPanel>
+        </Grid>
 
         </Panel>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=updates}">
 
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
+        <Grid RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
             <StackPanel Spacing="4">
               <TextBlock Text="Updates" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
               <TextBlock Text="llama-swap and llama.cpp releases." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <Border Padding="8"><Border Padding="4">        <ScrollViewer Padding="20" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
           <StackPanel Spacing="16" DataContext="{Binding UpdateViewModel}">
             <!-- Header -->
             <Border Padding="16" Background="#161622" CornerRadius="8">
@@ -755,9 +754,7 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-      
-          </Border></Border>
-        </DockPanel>
+        </Grid>
 
         </Panel>
       </Panel>
@@ -905,31 +902,31 @@
                       <Grid ColumnDefinitions="*,20,*" HorizontalAlignment="Stretch" MinWidth="520">
                         <StackPanel Spacing="6">
                           <TextBlock Text="Model ID" FontSize="12" Foreground="#A6ADC8"/>
-                          <TextBox Text="{Binding SelectedModel.ModelId}" PlaceholderText="qwen2.5-14b" MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
+                          <TextBox Text="{Binding SelectedModel.ModelId}" PlaceholderText="qwen2.5-14b" ToolTip.Tip="Unique id used in config.yml models: key and API routes." MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2" Spacing="6">
                           <TextBlock Text="Display name" FontSize="12" Foreground="#A6ADC8"/>
-                          <TextBox Text="{Binding SelectedModel.Name}" PlaceholderText="Friendly label" MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
+                          <TextBox Text="{Binding SelectedModel.Name}" PlaceholderText="Friendly label" ToolTip.Tip="Optional display name shown in UIs and listings." MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
                         </StackPanel>
                       </Grid>
                       <Grid ColumnDefinitions="*,20,*" HorizontalAlignment="Stretch" MinWidth="520">
                         <StackPanel Spacing="6">
                           <TextBlock Text="Context" FontSize="12" Foreground="#A6ADC8"/>
-                          <TextBox Text="{Binding SelectedModel.ContextSize}" PlaceholderText="0 = default" MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
+                          <TextBox Text="{Binding SelectedModel.ContextSize}" PlaceholderText="0 = default" ToolTip.Tip="--ctx-size: context window tokens. 0 uses the model default." MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2" Spacing="6">
                           <TextBlock Text="GPU layers" FontSize="12" Foreground="#A6ADC8"/>
-                          <ComboBox ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" IsEditable="True" PlaceholderText="auto | all | N" MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
+                          <ComboBox ItemsSource="{Binding GpuLayersOptions}" SelectedItem="{Binding SelectedModel.GpuLayers}" IsEditable="True" PlaceholderText="auto | all | N" ToolTip.Tip="--gpu-layers / -ngl: layers offloaded to GPU. Number, all, or auto." MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
                         </StackPanel>
                       </Grid>
                       <Grid ColumnDefinitions="*,20,*" HorizontalAlignment="Stretch" MinWidth="520">
                         <StackPanel Spacing="6">
                           <TextBlock Text="Reasoning" FontSize="12" Foreground="#A6ADC8"/>
-                          <ComboBox ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
+                          <ComboBox ItemsSource="{Binding ReasoningOptions}" SelectedItem="{Binding SelectedModel.Reasoning}" MinHeight="36" ToolTip.Tip="--reasoning: off/on/auto. Empty omits the flag (server default)." HorizontalAlignment="Stretch" MinWidth="220"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2" Spacing="6">
                           <TextBlock Text="TTL (s)" FontSize="12" Foreground="#A6ADC8"/>
-                          <TextBox Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never" MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
+                          <TextBox Text="{Binding SelectedModel.Ttl}" PlaceholderText="0 = never" ToolTip.Tip="Idle TTL seconds before llama-swap unloads this model. 0 = never." MinHeight="36" HorizontalAlignment="Stretch" MinWidth="220"/>
                         </StackPanel>
                       </Grid>
                         <StackPanel Spacing="6">
@@ -943,12 +940,12 @@
                         </StackPanel>
                         <StackPanel Spacing="6">
                           <TextBlock Text="Server path" FontSize="12" Foreground="#A6ADC8"/>
-                          <TextBox Text="{Binding SelectedModel.LlamaServerPath}" PlaceholderText="/path/to/llama-server" MinHeight="36" HorizontalAlignment="Stretch"/>
+                          <TextBox Text="{Binding SelectedModel.LlamaServerPath}" PlaceholderText="/path/to/llama-server" ToolTip.Tip="Binary used for this model's cmd. Leave as default path when possible." MinHeight="36" HorizontalAlignment="Stretch"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,2,0,0">
-                          <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="jinja" Foreground="#CDD6F4"/>
-                          <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="fit on" Foreground="#CDD6F4"/>
-                          <CheckBox IsChecked="{Binding SelectedModel.NoMmap}" Content="no-mmap" Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.UseJinja}" Content="jinja" ToolTip.Tip="Enable --jinja for chat template engine." Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.FitOn}" Content="fit on" ToolTip.Tip="--fit on: fit model into available VRAM." Foreground="#CDD6F4"/>
+                          <CheckBox IsChecked="{Binding SelectedModel.NoMmap}" Content="no-mmap" ToolTip.Tip="--no-mmap: disable memory-mapped model load." Foreground="#CDD6F4"/>
                         </StackPanel>
                       </StackPanel>
 
@@ -1244,7 +1241,7 @@
                           <Button Grid.Column="1" Content="Copy" Click="OnCopyExtraArgsClick" Classes="ghost" Padding="10,5"/>
                           <Button Grid.Column="2" Content="Paste" Click="OnPasteExtraArgsClick" Classes="ghost" Padding="10,5"/>
                         </Grid>
-                        <TextBox Name="ExtraArgsTextBox" Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True"
+                        <TextBox Name="ExtraArgsTextBox" ToolTip.Tip="Raw extra flags appended to llama-server command line." Text="{Binding SelectedModel.ExtraArgs}" AcceptsReturn="True"
                                  MinHeight="200" TextWrapping="Wrap"
                                  KeyDown="OnExtraArgsKeyDown" GotFocus="OnExtraArgsGotFocus"
                                  PlaceholderText="--rope-scaling yarn --mmproj /path/mmproj.gguf"/>

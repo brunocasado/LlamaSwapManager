@@ -190,6 +190,8 @@ public partial class MainViewModel : ObservableObject
     public ICommand NavigateToUpdatesCommand { get; }
     public ICommand NavigateToConfigPreviewCommand { get; }
     public ICommand CloseModelEditorCommand { get; }
+    public ICommand MoveModelUpCommand { get; }
+    public ICommand MoveModelDownCommand { get; }
     public ICommand SetModelEditorSectionCommand { get; }
 
     // CanExecute
@@ -247,6 +249,8 @@ public partial class MainViewModel : ObservableObject
         NavigateToUpdatesCommand = new RelayCommand(() => CurrentView = "updates");
         NavigateToConfigPreviewCommand = new RelayCommand(() => CurrentView = "preview");
         CloseModelEditorCommand = new RelayCommand(CloseModelEditor);
+        MoveModelUpCommand = new RelayCommand<ModelEditItem?>(m => MoveModel(m, -1));
+        MoveModelDownCommand = new RelayCommand<ModelEditItem?>(m => MoveModel(m, +1));
         SetModelEditorSectionCommand = new RelayCommand<string?>(section =>
         {
             if (!string.IsNullOrWhiteSpace(section))
@@ -736,6 +740,20 @@ public partial class MainViewModel : ObservableObject
         IsNewModel = false;
         UpdateSelectedModelSourceLabel();
         (AddModelCommand as RelayCommand)?.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Reorder models in the UI collection; BuildConfigFromUI writes them in this order to config.yml.
+    /// </summary>
+    public void MoveModel(ModelEditItem? model, int delta)
+    {
+        if (model is null) return;
+        var i = Models.IndexOf(model);
+        if (i < 0) return;
+        var j = i + delta;
+        if (j < 0 || j >= Models.Count) return;
+        Models.Move(i, j);
+        PersistConfigToDisk("Model order updated.");
     }
 
     public void ExecuteSelectModel(ModelEditItem model)

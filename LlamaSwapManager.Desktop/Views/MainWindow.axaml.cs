@@ -315,6 +315,20 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnMoveModelUpClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (DataContext is MainViewModel vm && sender is Button button && button.DataContext is ModelEditItem model)
+            vm.MoveModel(model, -1);
+    }
+
+    private void OnMoveModelDownClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (DataContext is MainViewModel vm && sender is Button button && button.DataContext is ModelEditItem model)
+            vm.MoveModel(model, +1);
+    }
+
     private void OnCloneModelPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         e.Handled = true;
