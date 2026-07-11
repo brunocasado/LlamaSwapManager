@@ -137,7 +137,8 @@ public sealed class LlamaCppServicesTests
             {
                 Content = new StringContent("{\"tag_name\":\"b9999\",\"assets\":[]}")
             })));
-        var client = new GitHubReleaseClient(http);
+        using var fixture = new DirectoryFixture();
+        var client = new GitHubReleaseClient(http, "ggml-org/llama.cpp", fixture.Root);
 
         var release = await client.GetLatestReleaseAsync(CancellationToken.None);
 
@@ -153,12 +154,97 @@ public sealed class LlamaCppServicesTests
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new HttpResponseMessage(HttpStatusCode.OK);
         }));
-        var client = new GitHubReleaseClient(http);
+        using var fixture = new DirectoryFixture();
+        var client = new GitHubReleaseClient(http, "ggml-org/llama.cpp", fixture.Root);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
         await Assert.ThrowsAsync<TaskCanceledException>(() =>
             client.GetLatestReleaseAsync(cancellation.Token));
+    }
+
+    [Fact]
+    public async Task GitHubReleaseClient_UsesFreshCacheWithoutNetworkCall()
+    {
+        using var fixture = new DirectoryFixture();
+        var calls = 0;
+        using var http = new HttpClient(new StubHttpHandler((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Headers = { ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"release-1\"") },
+                Content = new StringContent("{\"tag_name\":\"b1000\",\"assets\":[]}")
+            });
+        }));
+        var client = new GitHubReleaseClient(http, "ggml-org/llama.cpp", fixture.Root, cacheLifetime: TimeSpan.FromHours(1));
+
+        var first = await client.GetLatestReleaseAsync(CancellationToken.None);
+        var second = await client.GetLatestReleaseAsync(CancellationToken.None);
+
+        Assert.Equal("b1000", first?.GetProperty("tag_name").GetString());
+        Assert.Equal("b1000", second?.GetProperty("tag_name").GetString());
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task GitHubReleaseClient_UsesEtagAndHandlesNotModified()
+    {
+        using var fixture = new DirectoryFixture();
+        var calls = 0;
+        using var http = new HttpClient(new StubHttpHandler((request, _) =>
+        {
+            calls++;
+            if (calls == 1)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Headers = { ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"release-1\"") },
+                    Content = new StringContent("{\"tag_name\":\"b1000\",\"assets\":[]}")
+                });
+            }
+
+            Assert.Contains(request.Headers.IfNoneMatch, tag => tag.Tag == "\"release-1\"");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotModified));
+        }));
+        var client = new GitHubReleaseClient(http, "ggml-org/llama.cpp", fixture.Root, cacheLifetime: TimeSpan.Zero);
+
+        await client.GetLatestReleaseAsync(CancellationToken.None);
+        var release = await client.GetLatestReleaseAsync(CancellationToken.None);
+
+        Assert.Equal("b1000", release?.GetProperty("tag_name").GetString());
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task GitHubReleaseClient_FallsBackToCacheOnRateLimit()
+    {
+        using var fixture = new DirectoryFixture();
+        var calls = 0;
+        using var http = new HttpClient(new StubHttpHandler((_, _) =>
+        {
+            calls++;
+            if (calls == 1)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"tag_name\":\"b1000\",\"assets\":[]}")
+                });
+            }
+
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(10));
+            return Task.FromResult(response);
+        }));
+        var client = new GitHubReleaseClient(http, "ggml-org/llama.cpp", fixture.Root, cacheLifetime: TimeSpan.Zero);
+
+        await client.GetLatestReleaseAsync(CancellationToken.None);
+        var rateLimited = await client.GetLatestReleaseAsync(CancellationToken.None);
+        var deferred = await client.GetLatestReleaseAsync(CancellationToken.None);
+
+        Assert.Equal("b1000", rateLimited?.GetProperty("tag_name").GetString());
+        Assert.Equal("b1000", deferred?.GetProperty("tag_name").GetString());
+        Assert.Equal(2, calls);
     }
 
     [Fact]

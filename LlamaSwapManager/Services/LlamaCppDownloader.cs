@@ -35,7 +35,11 @@ public sealed class LlamaCppDownloader : IDisposable
         var processManager = new LlamaCppProcessManager(Log);
         var platformConfigurator = new LlamaCppPlatformConfigurator(Log);
         _versionDetector = new LlamaCppVersionDetector(platformConfigurator, Log);
-        _releaseClient = new GitHubReleaseClient(_http, Log);
+        _releaseClient = new GitHubReleaseClient(
+            _http,
+            "ggml-org/llama.cpp",
+            Path.Combine(_downloadsDirectory, "github-cache"),
+            Log);
         _assetSelector = new LlamaCppAssetSelector(Log);
         _artifactDownloader = new LlamaCppArtifactDownloader(_http, Log);
         _installer = new LlamaCppInstaller(
