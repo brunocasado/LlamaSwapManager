@@ -73,6 +73,48 @@ public sealed class ArchiveExtractorTests
         Assert.Equal("readme", File.ReadAllText(Path.Combine(destination, "README.md")));
     }
 
+    [Fact]
+    public void ExtractZip_RejectsNonEmptyDestination()
+    {
+        using var fixture = new ArchiveFixture();
+        var archivePath = Path.Combine(fixture.Root, "release.zip");
+        var destination = Path.Combine(fixture.Root, "existing-output");
+        Directory.CreateDirectory(destination);
+        File.WriteAllText(Path.Combine(destination, "stale-file"), "stale");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("llama-server").Open());
+            writer.Write("binary");
+        }
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ArchiveExtractor.ExtractZip(archivePath, destination));
+
+        Assert.Contains("must be empty", exception.Message);
+        Assert.Equal("stale", File.ReadAllText(Path.Combine(destination, "stale-file")));
+    }
+
+    [Fact]
+    public void ExtractZip_ObservesPreCancelledToken()
+    {
+        using var fixture = new ArchiveFixture();
+        var archivePath = Path.Combine(fixture.Root, "release.zip");
+        var destination = Path.Combine(fixture.Root, "cancelled-output");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("llama-server").Open());
+            writer.Write("binary");
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(
+            () => ArchiveExtractor.ExtractZip(archivePath, destination, cancellation.Token));
+    }
+
     private sealed class ArchiveFixture : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), $"archive-tests-{Guid.NewGuid()}");

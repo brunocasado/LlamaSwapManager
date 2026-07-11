@@ -562,22 +562,18 @@ public class UpdateService : IDisposable
 
     private void SetExecutable(string path)
     {
-        if (_osName != "darwin" && _osName != "linux") return;
+        if (OperatingSystem.IsWindows())
+            return;
 
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "chmod",
-                Arguments = $"+x \"{path}\"",
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            })?.WaitForExit();
+            var mode = File.GetUnixFileMode(path);
+            mode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            File.SetUnixFileMode(path, mode);
         }
         catch (Exception ex)
         {
-            LogMessage?.Invoke($"Warning: chmod failed ({ex.Message})");
+            LogMessage?.Invoke($"Warning: executable permission update failed ({ex.Message})");
         }
     }
 
@@ -592,12 +588,14 @@ public class UpdateService : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName = "codesign",
-                Arguments = $"--verify -vvvv \"{path}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add("--verify");
+            psi.ArgumentList.Add("-vvvv");
+            psi.ArgumentList.Add(path);
 
             using var proc = Process.Start(psi);
             proc?.WaitForExit();
@@ -630,12 +628,14 @@ public class UpdateService : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName = "xattr",
-                Arguments = $"-d com.apple.quarantine \"{path}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add("-d");
+            psi.ArgumentList.Add("com.apple.quarantine");
+            psi.ArgumentList.Add(path);
 
             using var proc = Process.Start(psi);
             proc?.WaitForExit();

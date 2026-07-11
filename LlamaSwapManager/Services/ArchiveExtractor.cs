@@ -22,7 +22,7 @@ public static class ArchiveExtractor
 
         ZipFile.ExtractToDirectory(archivePath, destinationDir, overwriteFiles: true);
         ct.ThrowIfCancellationRequested();
-        FlattenSingleRootDirectory(destinationDir);
+        FlattenSingleRootDirectory(destinationDir, ct);
     }
 
     public static void ExtractTarGz(string archivePath, string destinationDir, CancellationToken ct = default)
@@ -36,17 +36,27 @@ public static class ArchiveExtractor
         TarFile.ExtractToDirectory(gzip, destinationDir, overwriteFiles: true);
 
         ct.ThrowIfCancellationRequested();
-        FlattenSingleRootDirectory(destinationDir);
+        FlattenSingleRootDirectory(destinationDir, ct);
     }
 
     private static void PrepareDestination(string destinationDir)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDir);
         Directory.CreateDirectory(destinationDir);
+
+        if (Directory.EnumerateFileSystemEntries(destinationDir).Any())
+        {
+            throw new InvalidOperationException(
+                $"Archive destination must be empty: {destinationDir}");
+        }
     }
 
-    private static void FlattenSingleRootDirectory(string destinationDir)
+    private static void FlattenSingleRootDirectory(
+        string destinationDir,
+        CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (Directory.EnumerateFiles(destinationDir).Any())
             return;
 
@@ -57,9 +67,11 @@ public static class ArchiveExtractor
         var root = directories[0];
         foreach (var entry in Directory.EnumerateFileSystemEntries(root))
         {
+            ct.ThrowIfCancellationRequested();
+
             var destination = Path.Combine(destinationDir, Path.GetFileName(entry));
             if (File.Exists(entry))
-                File.Move(entry, destination, overwrite: true);
+                File.Move(entry, destination);
             else
                 Directory.Move(entry, destination);
         }

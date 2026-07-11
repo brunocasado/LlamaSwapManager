@@ -582,7 +582,9 @@ public class LlamaCppDownloader : IDisposable
         }
 
         // Backup existing files in target directory
-        var backupPath = Path.Combine(_downloadsDir, $"llama-cpp-backup-{DateTime.UtcNow:yyyyMMddHHmmss}");
+        var backupPath = Path.Combine(
+            _downloadsDir,
+            $"llama-cpp-backup-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}");
 
         // Kill any running llama-server/llama-cpp processes before install
         LogMessage?.Invoke("[llama.cpp] Stopping llama-server processes before update...");
@@ -624,12 +626,12 @@ public class LlamaCppDownloader : IDisposable
                 .Select(f => f.Replace(stagingDir + Path.DirectorySeparatorChar, "")).ToList();
             LogMessage?.Invoke($"[llama.cpp] Extracted {stagingFiles.Count} files: {string.Join(", ", stagingFiles)}");
 
-            CopyDirectoryContents(stagingDir, targetDirectory);
+            CopyDirectoryContents(stagingDir, targetDirectory, ct);
 
             // Make binaries executable on Unix
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                MakeBinariesExecutable(targetDirectory);
+                MakeBinariesExecutable(targetDirectory, ct);
             }
 
             // Verify key binary exists after install
@@ -654,17 +656,24 @@ public class LlamaCppDownloader : IDisposable
             {
                 try
                 {
-                    var psi = new System.Diagnostics.ProcessStartInfo
+                    var startInfo = new ProcessStartInfo
                     {
                         FileName = "/usr/bin/xattr",
-                        Arguments = $"-d com.apple.quarantine \"{targetDirectory}\"",
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    proc?.WaitForExit();
+                    startInfo.ArgumentList.Add("-d");
+                    startInfo.ArgumentList.Add("com.apple.quarantine");
+                    startInfo.ArgumentList.Add(targetDirectory);
+
+                    using var process = Process.Start(startInfo);
+                    if (process is not null)
+                        await process.WaitForExitAsync(ct);
                 }
-                catch { /* non-critical */ }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogMessage?.Invoke($"[llama.cpp] Quarantine removal warning: {ex.Message}");
+                }
 
                 // H1: Verify codesign on extracted binary
                 var codesignOk = VerifyCodesign(expectedPath);
@@ -678,6 +687,12 @@ public class LlamaCppDownloader : IDisposable
             DeleteDirectory(backupPath);
             return true;
         }
+        catch (OperationCanceledException)
+        {
+            LogMessage?.Invoke("[llama.cpp] Installation cancelled — rolling back");
+            Rollback(backupPath, targetDirectory);
+            throw;
+        }
         catch (Exception ex)
         {
             LogMessage?.Invoke($"[llama.cpp] Install error: {ex.Message}");
@@ -686,153 +701,151 @@ public class LlamaCppDownloader : IDisposable
         }
     }
 
-private void CopyDirectoryContents(string sourceDir, string targetDir)
+    private void CopyDirectoryContents(
+        string sourceDir,
+        string targetDir,
+        CancellationToken ct = default)
     {
-        foreach (var file in Directory.GetFiles(sourceDir))
+        ct.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(targetDir);
+
+        foreach (var file in Directory.EnumerateFiles(sourceDir))
         {
-            var dest = Path.Combine(targetDir, Path.GetFileName(file));
-            var sourceSize = new System.IO.FileInfo(file).Length;
-            if (Path.GetFileName(file).Contains("llama-server"))
+            ct.ThrowIfCancellationRequested();
+
+            var fileName = Path.GetFileName(file);
+            var destination = Path.Combine(targetDir, fileName);
+            if (fileName.Contains("llama-server", StringComparison.OrdinalIgnoreCase))
             {
-                LogMessage?.Invoke($"[llama.cpp] CopyDirectoryContents: {Path.GetFileName(file)} -> {dest} ({sourceSize} bytes)");
+                var sourceSize = new FileInfo(file).Length;
+                LogMessage?.Invoke(
+                    $"[llama.cpp] CopyDirectoryContents: {fileName} -> {destination} ({sourceSize} bytes)");
             }
-            File.Copy(file, dest, overwrite: true);
+
+            File.Copy(file, destination, overwrite: true);
         }
 
-        foreach (var subdir in Directory.GetDirectories(sourceDir))
+        foreach (var subdirectory in Directory.EnumerateDirectories(sourceDir))
         {
-            var dest = Path.Combine(targetDir, Path.GetFileName(subdir));
-            if (!Directory.Exists(dest))
-                Directory.CreateDirectory(dest);
-            CopyDirectoryContents(subdir, dest);
+            ct.ThrowIfCancellationRequested();
+            var destination = Path.Combine(targetDir, Path.GetFileName(subdirectory));
+            CopyDirectoryContents(subdirectory, destination, ct);
         }
     }
 
-    private void MakeBinariesExecutable(string directory)
+    private void MakeBinariesExecutable(string directory, CancellationToken ct)
     {
-        // Remove old symlinks first (they may point to old versioned dylibs)
-        foreach (var file in Directory.GetFiles(directory, "*.dylib"))
+        if (OperatingSystem.IsWindows())
+            return;
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.dylib"))
         {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (IsSymlink(file))
+                    File.Delete(file);
+            }
+            catch (Exception ex)
+            {
+                LogMessage?.Invoke($"[llama.cpp] Symlink cleanup warning for {Path.GetFileName(file)}: {ex.Message}");
+            }
+        }
+
+        foreach (var file in Directory.EnumerateFiles(directory))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var name = Path.GetFileName(file);
+            if (!IsExecutableBinaryName(name))
+                continue;
+
+            try
+            {
+                var mode = File.GetUnixFileMode(file);
+                mode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+                File.SetUnixFileMode(file, mode);
+            }
+            catch (Exception ex)
+            {
+                LogMessage?.Invoke($"[llama.cpp] Permission update failed for {name}: {ex.Message}");
+            }
+        }
+
+        // Create versioned .dylib symlinks for the newest version only.
+        // Pattern: libfoo.0.0.9660.dylib → libfoo.0.0.dylib → libfoo.0.dylib
+        var dylibGroups = new Dictionary<string, (string Path, int Minor, int Patch)>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.dylib"))
+        {
+            ct.ThrowIfCancellationRequested();
+
             var name = Path.GetFileNameWithoutExtension(file);
             var parts = name.Split('.');
-            if (parts.Length >= 3 && parts[^1] == "dylib")
+            if (parts.Length < 4 ||
+                !int.TryParse(parts[^3], out _) ||
+                !int.TryParse(parts[^2], out var minor) ||
+                !int.TryParse(parts[^1], out var patch) ||
+                (minor == 0 && patch == 0))
             {
-                // Check if this looks like a symlink target (versioned) or a symlink
-                // Remove any existing symlink files
-                try
-                {
-                    if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint) ||
-                        IsSymlink(file))
-                    {
-                        File.Delete(file);
-                    }
-                }
-                catch { }
+                continue;
             }
-        }
 
-        // Set executable permission using .NET native API (more reliable than chmod subprocess)
-        foreach (var file in Directory.GetFiles(directory))
-        {
-            var name = Path.GetFileName(file);
-            // Make known binary names executable
-            if (name.StartsWith("llama") || name.StartsWith("ggml") || name == "rpc-server")
+            var baseName = string.Join(".", parts.Take(parts.Length - 2));
+            if (!dylibGroups.TryGetValue(baseName, out var current) ||
+                current.Minor < minor ||
+                (current.Minor == minor && current.Patch < patch))
             {
-                try
-                {
-                    var attrs = File.GetAttributes(file);
-                    if ((attrs & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
-                    {
-                        File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
-                    }
-                    // On Unix, set execute permission
-                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                    {
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "/bin/sh",
-                            Arguments = $"-c \"chmod +x '{file}'\"",
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            RedirectStandardError = true
-                        };
-                        using var proc = System.Diagnostics.Process.Start(psi);
-                        proc?.WaitForExit(3000);
-                        var err = proc?.StandardError.ReadToEnd()?.Trim();
-                        if (!string.IsNullOrEmpty(err))
-                        {
-                            LogMessage?.Invoke($"[llama.cpp] chmod warning for {name}: {err}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] chmod error for {name}: {ex.Message}");
-                }
-            }
-        }
-
-         // Create versioned .dylib symlinks for NEWEST version only
-        // Pattern: libfoo.0.0.9660.dylib → libfoo.0.0.dylib → libfoo.0.dylib
-        var dylibGroups = new Dictionary<string, (string path, int minor, int patch)>();
-        foreach (var file in Directory.GetFiles(directory, "*.dylib"))
-        {
-            var name = Path.GetFileNameWithoutExtension(file); // e.g. libllama-common.0.0.9660
-            var parts = name.Split('.');
-            if (parts.Length >= 4 &&
-                int.TryParse(parts[^3], out var major) &&
-                int.TryParse(parts[^2], out var minor) &&
-                int.TryParse(parts[^1], out var patch) &&
-                !(parts[^2] == "0" && parts[^1] == "0"))
-            {
-                var baseName = string.Join(".", parts.Take(parts.Length - 2));
-               if (!dylibGroups.ContainsKey(baseName) ||
-                    dylibGroups[baseName].minor < minor ||
-                    (dylibGroups[baseName].minor == minor && dylibGroups[baseName].patch < patch))
-                {
-                    dylibGroups[baseName] = (file, minor, patch);
-                }
+                dylibGroups[baseName] = (file, minor, patch);
             }
         }
 
         foreach (var group in dylibGroups.Values)
         {
-            var name = Path.GetFileNameWithoutExtension(group.path);
-            var parts = name.Split('.');
-            var link1 = string.Join(".", parts.Take(parts.Length - 1)) + ".dylib";
-            var link1Path = Path.Combine(directory, link1);
-            try { CreateSymlink(link1Path, name + ".dylib"); } catch { }
+            ct.ThrowIfCancellationRequested();
 
-            var link2 = string.Join(".", parts.Take(parts.Length - 2)) + ".dylib";
-            var link2Path = Path.Combine(directory, link2);
-            try { CreateSymlink(link2Path, link1); } catch { }
+            var name = Path.GetFileNameWithoutExtension(group.Path);
+            var parts = name.Split('.');
+            var firstLinkName = string.Join(".", parts.Take(parts.Length - 1)) + ".dylib";
+            var firstLinkPath = Path.Combine(directory, firstLinkName);
+            CreateSymlink(firstLinkPath, name + ".dylib");
+
+            var secondLinkName = string.Join(".", parts.Take(parts.Length - 2)) + ".dylib";
+            var secondLinkPath = Path.Combine(directory, secondLinkName);
+            CreateSymlink(secondLinkPath, firstLinkName);
         }
     }
+
+    private static bool IsExecutableBinaryName(string name) =>
+        name.StartsWith("llama", StringComparison.Ordinal) ||
+        name.StartsWith("ggml", StringComparison.Ordinal) ||
+        name.Equals("rpc-server", StringComparison.Ordinal);
 
     private static bool IsSymlink(string path)
     {
         try
         {
-            var info = new System.IO.FileInfo(path);
-            return info.LinkTarget != null;
+            return new FileInfo(path).LinkTarget is not null;
         }
-        catch { return false; }
+        catch
+        {
+            return false;
+        }
     }
 
-    private static void CreateSymlink(string linkPath, string target)
+    private void CreateSymlink(string linkPath, string target)
     {
-        // Remove existing file/symlink at linkPath
-        if (File.Exists(linkPath)) File.Delete(linkPath);
-        // Create symlink using ln -s
-        var psi = new System.Diagnostics.ProcessStartInfo
+        try
         {
-            FileName = "/bin/ln",
-            Arguments = $"-sf \"{target}\" \"{linkPath}\"",
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        using var proc = System.Diagnostics.Process.Start(psi);
-        proc?.WaitForExit(3000);
+            if (File.Exists(linkPath) || IsSymlink(linkPath))
+                File.Delete(linkPath);
+
+            File.CreateSymbolicLink(linkPath, target);
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[llama.cpp] Symlink creation warning for {Path.GetFileName(linkPath)}: {ex.Message}");
+        }
     }
 
     private void Rollback(string backupPath, string targetDirectory)
@@ -1418,7 +1431,7 @@ private void CopyDirectoryContents(string sourceDir, string targetDir)
             await stream.CopyToAsync(fileStream, 81920, ct);
 
             // Extract to target directory
-            var stagingDir = Path.Combine(_downloadsDir, "cudart-staging");
+            var stagingDir = Path.Combine(_downloadsDir, $"cudart-staging-{Guid.NewGuid():N}");
             Directory.CreateDirectory(stagingDir);
 
             try
@@ -1426,14 +1439,11 @@ private void CopyDirectoryContents(string sourceDir, string targetDir)
                 ArchiveExtractor.ExtractTarGz(tempArchive, stagingDir, ct);
 
                 // Copy extracted files to target directory
-                CopyDirectoryContents(stagingDir, targetDirectory);
+                CopyDirectoryContents(stagingDir, targetDirectory, ct);
                 LogMessage?.Invoke("[llama.cpp] CUDA runtime libraries installed");
 
                 // Make binaries executable on Unix
-                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    MakeBinariesExecutable(targetDirectory);
-                }
+                MakeBinariesExecutable(targetDirectory, ct);
             }
             finally
             {
@@ -1443,6 +1453,10 @@ private void CopyDirectoryContents(string sourceDir, string targetDir)
             }
 
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
