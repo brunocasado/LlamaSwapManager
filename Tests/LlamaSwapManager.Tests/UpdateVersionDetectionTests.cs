@@ -53,10 +53,10 @@ public class UpdateVersionDetectionTests
     }
 
     [Fact]
-    public void DetectLocalVersion_ReturnsNull_WhenBinaryNotFound()
+    public async Task DetectLocalVersion_ReturnsNull_WhenBinaryNotFound()
     {
         var downloader = new LlamaCppDownloader(_llamaCppDir);
-        var result = downloader.CheckForUpdateAsync(_llamaCppDir).Result;
+        var result = await downloader.CheckForUpdateAsync(_llamaCppDir);
 
         // Since no binary exists, DetectLocalVersion should return null
         Assert.Null(result.LocalVersion);

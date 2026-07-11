@@ -498,6 +498,7 @@ public class LlamaCppDownloader : IDisposable
             while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
             {
                 await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+
                 totalRead += bytesRead;
 
                 if (totalBytes > 0 && progress != null)
@@ -581,12 +582,14 @@ public class LlamaCppDownloader : IDisposable
         }
 
         // Backup existing files in target directory
-        var backupPath = Path.Combine(_downloadsDir, $"llama-cpp-backup-{DateTime.UtcNow:yyyyMMddHHmmss}");
+        var backupPath = Path.Combine(
+            _downloadsDir,
+            $"llama-cpp-backup-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}");
 
         // Kill any running llama-server/llama-cpp processes before install
         LogMessage?.Invoke("[llama.cpp] Stopping llama-server processes before update...");
-        await KillLlamaServerProcessesAsync(targetDirectory);
-        await Task.Delay(1000); // Give processes time to release file handles
+        await KillLlamaServerProcessesAsync(targetDirectory, ct);
+        await Task.Delay(1000, ct); // Give processes time to release file handles
 
         try
         {
@@ -601,12 +604,12 @@ public class LlamaCppDownloader : IDisposable
 
             if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                await ExtractZipAsync(archivePath, stagingDir, ct);
+                ArchiveExtractor.ExtractZip(archivePath, stagingDir, ct);
             }
             else if (archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
                      archivePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
             {
-                await ExtractTarGzAsync(archivePath, stagingDir, ct);
+                ArchiveExtractor.ExtractTarGz(archivePath, stagingDir, ct);
             }
             else
             {
@@ -623,12 +626,12 @@ public class LlamaCppDownloader : IDisposable
                 .Select(f => f.Replace(stagingDir + Path.DirectorySeparatorChar, "")).ToList();
             LogMessage?.Invoke($"[llama.cpp] Extracted {stagingFiles.Count} files: {string.Join(", ", stagingFiles)}");
 
-            CopyDirectoryContents(stagingDir, targetDirectory);
+            CopyDirectoryContents(stagingDir, targetDirectory, ct);
 
             // Make binaries executable on Unix
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                MakeBinariesExecutable(targetDirectory);
+                MakeBinariesExecutable(targetDirectory, ct);
             }
 
             // Verify key binary exists after install
@@ -653,17 +656,24 @@ public class LlamaCppDownloader : IDisposable
             {
                 try
                 {
-                    var psi = new System.Diagnostics.ProcessStartInfo
+                    var startInfo = new ProcessStartInfo
                     {
                         FileName = "/usr/bin/xattr",
-                        Arguments = $"-d com.apple.quarantine \"{targetDirectory}\"",
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    proc?.WaitForExit();
+                    startInfo.ArgumentList.Add("-d");
+                    startInfo.ArgumentList.Add("com.apple.quarantine");
+                    startInfo.ArgumentList.Add(targetDirectory);
+
+                    using var process = Process.Start(startInfo);
+                    if (process is not null)
+                        await process.WaitForExitAsync(ct);
                 }
-                catch { /* non-critical */ }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogMessage?.Invoke($"[llama.cpp] Quarantine removal warning: {ex.Message}");
+                }
 
                 // H1: Verify codesign on extracted binary
                 var codesignOk = VerifyCodesign(expectedPath);
@@ -677,6 +687,12 @@ public class LlamaCppDownloader : IDisposable
             DeleteDirectory(backupPath);
             return true;
         }
+        catch (OperationCanceledException)
+        {
+            LogMessage?.Invoke("[llama.cpp] Installation cancelled — rolling back");
+            Rollback(backupPath, targetDirectory);
+            throw;
+        }
         catch (Exception ex)
         {
             LogMessage?.Invoke($"[llama.cpp] Install error: {ex.Message}");
@@ -685,376 +701,151 @@ public class LlamaCppDownloader : IDisposable
         }
     }
 
-    private async Task ExtractZipAsync(string archivePath, string destinationDir, CancellationToken ct)
+    private void CopyDirectoryContents(
+        string sourceDir,
+        string targetDir,
+        CancellationToken ct = default)
     {
-        // Handle zip files that may have a top-level directory
-        using var archive = ZipFile.OpenRead(archivePath);
-        var entries = archive.Entries.ToList();
+        ct.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(targetDir);
 
-        // Check if all entries share a common top-level directory
-        var topDir = GetTopLevelDirectory(entries);
-
-        foreach (var entry in entries)
+        foreach (var file in Directory.EnumerateFiles(sourceDir))
         {
             ct.ThrowIfCancellationRequested();
 
-            // Skip empty directories
-            if (entry.Length == 0 && string.IsNullOrEmpty(entry.Name))
-                continue;
-
-            // Remove top-level directory prefix if present
-            var targetPath = topDir != null && entry.FullName.StartsWith(topDir)
-                ? entry.FullName.Substring(topDir.Length).TrimStart('/', '\\')
-                : entry.FullName;
-
-            if (string.IsNullOrEmpty(targetPath))
-                continue;
-
-            var fullPath = Path.Combine(destinationDir, targetPath);
-            var fullDir = Path.GetDirectoryName(fullPath);
-            if (!string.IsNullOrEmpty(fullDir) && !Directory.Exists(fullDir))
-                Directory.CreateDirectory(fullDir);
-
-            entry.ExtractToFile(fullPath, overwrite: true);
-        }
-    }
-
-    private async Task ExtractTarGzAsync(string archivePath, string destinationDir, CancellationToken ct)
-    {
-        // Decompress gzip and parse tar manually — more reliable than custom TarArchive
-        using var archive = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var gzip = new GZipStream(archive, CompressionMode.Decompress);
-        
-        // Extract top-level directory from archive filename (e.g., llama-b9660-bin-macos-arm64.tar.gz → llama-b9660/)
-          var archiveName = Path.GetFileName(archivePath); // llama-b9660-bin-macos-arm64.tar.gz
-          // Remove .tar.gz or .tgz
-          archiveName = System.Text.RegularExpressions.Regex.Replace(archiveName, @"\.tar\.gz$|\.tgz$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-          // llama-b9660-bin-macos-arm64
-          // Remove known suffixes: -bin-macos-arm64, -bin-linux-x64, etc.
-          archiveName = System.Text.RegularExpressions.Regex.Replace(archiveName, @"-bin-(?:macos|linux|windows)-?(?:arm64|x64|x86_64)?$", "");
-          // Remove trailing -macos, -linux, -windows if present
-          archiveName = System.Text.RegularExpressions.Regex.Replace(archiveName, @"-(?:macos|linux|windows)$", "");
-          var topDir = archiveName + "/";
-        
-        // Read all decompressed tar data into memory
-        var tarData = new byte[81920];
-        var totalRead = 0;
-        int bytesRead;
-        while ((bytesRead = await gzip.ReadAsync(tarData, totalRead, tarData.Length - totalRead, ct)) > 0)
-        {
-            totalRead += bytesRead;
-            if (totalRead == tarData.Length)
+            var fileName = Path.GetFileName(file);
+            var destination = Path.Combine(targetDir, fileName);
+            if (fileName.Contains("llama-server", StringComparison.OrdinalIgnoreCase))
             {
-                Array.Resize(ref tarData, tarData.Length * 2);
+                var sourceSize = new FileInfo(file).Length;
+                LogMessage?.Invoke(
+                    $"[llama.cpp] CopyDirectoryContents: {fileName} -> {destination} ({sourceSize} bytes)");
             }
+
+            File.Copy(file, destination, overwrite: true);
         }
-        if (totalRead < tarData.Length)
-        {
-            Array.Resize(ref tarData, totalRead);
-        }
-        
-        LogMessage?.Invoke($"[llama.cpp] Top-level directory: '{topDir}' (from '{archivePath}')");
-            
-            // Parse tar entries (512-byte blocks)
-        var offset = 0;
-        var blockCount = tarData.Length / 512;
-        var entriesFound = 0;
-        
-        for (var i = 0; i < blockCount; i++)
+
+        foreach (var subdirectory in Directory.EnumerateDirectories(sourceDir))
         {
             ct.ThrowIfCancellationRequested();
-            
-            // Check for end-of-archive (two blocks of 512 zero bytes) — only at the very end
-            if (i + 2 >= blockCount)
+            var destination = Path.Combine(targetDir, Path.GetFileName(subdirectory));
+            CopyDirectoryContents(subdirectory, destination, ct);
+        }
+    }
+
+    private void MakeBinariesExecutable(string directory, CancellationToken ct)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.dylib"))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
             {
-                var allZero = true;
-                for (var b = 0; b < 1024; b++)
-                {
-                    if (tarData[offset + b] != 0) { allZero = false; break; }
-                }
-                if (allZero) break;
+                if (IsSymlink(file))
+                    File.Delete(file);
             }
-            
-            // Parse header
-            var name = System.Text.Encoding.ASCII.GetString(tarData, offset, 100).TrimEnd('\0');
-            if (string.IsNullOrEmpty(name)) { offset += 512; continue; }
-            
-            // Skip invalid entries (Mach-O segments have garbage names with null chars)
-            if (name.IndexOf('\0') >= 0 || name.Any(c => c < 32 && c != '\0'))
+            catch (Exception ex)
             {
-                offset += 512;
+                LogMessage?.Invoke($"[llama.cpp] Symlink cleanup warning for {Path.GetFileName(file)}: {ex.Message}");
+            }
+        }
+
+        foreach (var file in Directory.EnumerateFiles(directory))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var name = Path.GetFileName(file);
+            if (!IsExecutableBinaryName(name))
                 continue;
-            }
-            
-            entriesFound++;
-            
-            // Type flag at offset 156 — 0 or empty = regular file, 5 = directory
-            var typeFlag = (char)tarData[offset + 156];
-            var isDirectory = typeFlag == '5';
-            
-            // Size at offset 124, 12 bytes octal
-            var sizeStr = System.Text.Encoding.ASCII.GetString(tarData, offset + 124, 12).TrimEnd('\0', ' ');
-            long fileSize = 0;
-            try { fileSize = Convert.ToInt64(sizeStr, 8); } catch { }
-            
-            // Remove top-level directory prefix (from filename, not from parsing)
-            var targetPath = name;
-            if (name.StartsWith(topDir))
-            {
-                targetPath = name.Substring(topDir.Length).TrimStart('/');
-            }
-            // Skip the top-level directory entry itself (don't create subdirectory)
-            if (string.IsNullOrEmpty(targetPath))
-            {
-                offset += 512;
-                continue;
-            }
-            
-            var fullPath = Path.Combine(destinationDir, targetPath);
-            
-            if (isDirectory)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Tar entry (dir): {name} -> {fullPath}");
-                Directory.CreateDirectory(fullPath);
-            }
-            else if (fileSize > 0)
-            {
-                var fullDir = Path.GetDirectoryName(fullPath);
-                if (!string.IsNullOrEmpty(fullDir) && !Directory.Exists(fullDir))
-                    Directory.CreateDirectory(fullDir);
-                
-                LogMessage?.Invoke($"[llama.cpp] Tar entry (file): {name} -> {fullPath} ({fileSize} bytes)");
-                
-                using var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                var dataOffset = offset + 512;
-                var remaining = fileSize;
-                var buffer = new byte[Math.Min((int)Math.Min(remaining, 65536), 81920)];
-                var totalWritten = 0;
-                
-                while (remaining > 0)
-                {
-                    var toRead = (int)Math.Min(remaining, buffer.Length);
-                    if (dataOffset + toRead > tarData.Length) break;
-                    await fs.WriteAsync(tarData, dataOffset, toRead, ct);
-                    dataOffset += toRead;
-                    remaining -= toRead;
-                    totalWritten += toRead;
-                }
-                
-                if (name.Contains("llama-server"))
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Extracted llama-server: {totalWritten} bytes (expected {fileSize})");
-                }
-                
-                // Skip padding to 512-byte boundary
-                var dataPadding = fileSize % 512;
-                if (dataPadding > 0)
-                {
-                    dataOffset += (int)(512 - dataPadding);
-                }
-            }
-            
-            offset += 512;
-        }
-        
-        LogMessage?.Invoke($"[llama.cpp] Extracted {entriesFound} entries to {destinationDir}");
-    }
 
-    private string? GetTopLevelDirectory(System.Collections.Generic.IList<ZipArchiveEntry> entries)
-    {
-        if (entries.Count == 0) return null;
-
-        // Find the common prefix of all non-empty entry paths
-        var firstPath = entries[0].FullName;
-        var firstSlash = firstPath.IndexOf('/');
-        var firstBackslash = firstPath.IndexOf('\\');
-        var firstSlashIdx = Math.Max(firstSlash, firstBackslash);
-
-        if (firstSlashIdx <= 0) return null; // No top-level directory
-
-        var candidate = firstPath.Substring(0, firstSlashIdx + 1);
-
-        // Verify all entries start with this prefix
-        foreach (var entry in entries)
-        {
-            if (!entry.FullName.StartsWith(candidate, StringComparison.Ordinal) && !string.IsNullOrEmpty(entry.FullName))
+            try
             {
-                return null;
+                var mode = File.GetUnixFileMode(file);
+                mode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+                File.SetUnixFileMode(file, mode);
+            }
+            catch (Exception ex)
+            {
+                LogMessage?.Invoke($"[llama.cpp] Permission update failed for {name}: {ex.Message}");
             }
         }
 
-        return candidate;
-    }
-
-    private string? GetTopLevelDirectoryFromTar(System.Collections.Generic.IList<TarEntry> entries)
-    {
-        if (entries.Count == 0) return null;
-
-        var firstPath = entries[0].Name;
-        var firstSlash = firstPath.IndexOf('/');
-
-        if (firstSlash <= 0) return null;
-
-        var candidate = firstPath.Substring(0, firstSlash + 1);
-
-        foreach (var entry in entries)
+        // Create versioned .dylib symlinks for the newest version only.
+        // Pattern: libfoo.0.0.9660.dylib → libfoo.0.0.dylib → libfoo.0.dylib
+        var dylibGroups = new Dictionary<string, (string Path, int Minor, int Patch)>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.dylib"))
         {
-            if (!string.IsNullOrEmpty(entry.Name) && !entry.Name.StartsWith(candidate, StringComparison.Ordinal))
-            {
-                return null;
-            }
-        }
+            ct.ThrowIfCancellationRequested();
 
-        return candidate;
-    }
-
-    private void CopyDirectoryContents(string sourceDir, string targetDir)
-    {
-        foreach (var file in Directory.GetFiles(sourceDir))
-        {
-            var dest = Path.Combine(targetDir, Path.GetFileName(file));
-            var sourceSize = new System.IO.FileInfo(file).Length;
-            if (Path.GetFileName(file).Contains("llama-server"))
-            {
-                LogMessage?.Invoke($"[llama.cpp] CopyDirectoryContents: {Path.GetFileName(file)} -> {dest} ({sourceSize} bytes)");
-            }
-            File.Copy(file, dest, overwrite: true);
-        }
-
-        foreach (var subdir in Directory.GetDirectories(sourceDir))
-        {
-            var dest = Path.Combine(targetDir, Path.GetFileName(subdir));
-            if (!Directory.Exists(dest))
-                Directory.CreateDirectory(dest);
-            CopyDirectoryContents(subdir, dest);
-        }
-    }
-
-    private void MakeBinariesExecutable(string directory)
-    {
-        // Remove old symlinks first (they may point to old versioned dylibs)
-        foreach (var file in Directory.GetFiles(directory, "*.dylib"))
-        {
             var name = Path.GetFileNameWithoutExtension(file);
             var parts = name.Split('.');
-            if (parts.Length >= 3 && parts[^1] == "dylib")
+            if (parts.Length < 4 ||
+                !int.TryParse(parts[^3], out _) ||
+                !int.TryParse(parts[^2], out var minor) ||
+                !int.TryParse(parts[^1], out var patch) ||
+                (minor == 0 && patch == 0))
             {
-                // Check if this looks like a symlink target (versioned) or a symlink
-                // Remove any existing symlink files
-                try
-                {
-                    if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint) ||
-                        IsSymlink(file))
-                    {
-                        File.Delete(file);
-                    }
-                }
-                catch { }
+                continue;
             }
-        }
 
-        // Set executable permission using .NET native API (more reliable than chmod subprocess)
-        foreach (var file in Directory.GetFiles(directory))
-        {
-            var name = Path.GetFileName(file);
-            // Make known binary names executable
-            if (name.StartsWith("llama") || name.StartsWith("ggml") || name == "rpc-server")
+            var baseName = string.Join(".", parts.Take(parts.Length - 2));
+            if (!dylibGroups.TryGetValue(baseName, out var current) ||
+                current.Minor < minor ||
+                (current.Minor == minor && current.Patch < patch))
             {
-                try
-                {
-                    var attrs = File.GetAttributes(file);
-                    if ((attrs & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
-                    {
-                        File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
-                    }
-                    // On Unix, set execute permission
-                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                    {
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "/bin/sh",
-                            Arguments = $"-c \"chmod +x '{file}'\"",
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            RedirectStandardError = true
-                        };
-                        using var proc = System.Diagnostics.Process.Start(psi);
-                        proc?.WaitForExit(3000);
-                        var err = proc?.StandardError.ReadToEnd()?.Trim();
-                        if (!string.IsNullOrEmpty(err))
-                        {
-                            LogMessage?.Invoke($"[llama.cpp] chmod warning for {name}: {err}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] chmod error for {name}: {ex.Message}");
-                }
-            }
-        }
-
-         // Create versioned .dylib symlinks for NEWEST version only
-        // Pattern: libfoo.0.0.9660.dylib → libfoo.0.0.dylib → libfoo.0.dylib
-        var dylibGroups = new Dictionary<string, (string path, int minor, int patch)>();
-        foreach (var file in Directory.GetFiles(directory, "*.dylib"))
-        {
-            var name = Path.GetFileNameWithoutExtension(file); // e.g. libllama-common.0.0.9660
-            var parts = name.Split('.');
-            if (parts.Length >= 4 &&
-                int.TryParse(parts[^3], out var major) &&
-                int.TryParse(parts[^2], out var minor) &&
-                int.TryParse(parts[^1], out var patch) &&
-                !(parts[^2] == "0" && parts[^1] == "0"))
-            {
-                var baseName = string.Join(".", parts.Take(parts.Length - 2));
-               if (!dylibGroups.ContainsKey(baseName) ||
-                    dylibGroups[baseName].minor < minor ||
-                    (dylibGroups[baseName].minor == minor && dylibGroups[baseName].patch < patch))
-                {
-                    dylibGroups[baseName] = (file, minor, patch);
-                }
+                dylibGroups[baseName] = (file, minor, patch);
             }
         }
 
         foreach (var group in dylibGroups.Values)
         {
-            var name = Path.GetFileNameWithoutExtension(group.path);
-            var parts = name.Split('.');
-            var link1 = string.Join(".", parts.Take(parts.Length - 1)) + ".dylib";
-            var link1Path = Path.Combine(directory, link1);
-            try { CreateSymlink(link1Path, name + ".dylib"); } catch { }
+            ct.ThrowIfCancellationRequested();
 
-            var link2 = string.Join(".", parts.Take(parts.Length - 2)) + ".dylib";
-            var link2Path = Path.Combine(directory, link2);
-            try { CreateSymlink(link2Path, link1); } catch { }
+            var name = Path.GetFileNameWithoutExtension(group.Path);
+            var parts = name.Split('.');
+            var firstLinkName = string.Join(".", parts.Take(parts.Length - 1)) + ".dylib";
+            var firstLinkPath = Path.Combine(directory, firstLinkName);
+            CreateSymlink(firstLinkPath, name + ".dylib");
+
+            var secondLinkName = string.Join(".", parts.Take(parts.Length - 2)) + ".dylib";
+            var secondLinkPath = Path.Combine(directory, secondLinkName);
+            CreateSymlink(secondLinkPath, firstLinkName);
         }
     }
+
+    private static bool IsExecutableBinaryName(string name) =>
+        name.StartsWith("llama", StringComparison.Ordinal) ||
+        name.StartsWith("ggml", StringComparison.Ordinal) ||
+        name.Equals("rpc-server", StringComparison.Ordinal);
 
     private static bool IsSymlink(string path)
     {
         try
         {
-            var info = new System.IO.FileInfo(path);
-            return info.LinkTarget != null;
+            return new FileInfo(path).LinkTarget is not null;
         }
-        catch { return false; }
+        catch
+        {
+            return false;
+        }
     }
 
-    private static void CreateSymlink(string linkPath, string target)
+    private void CreateSymlink(string linkPath, string target)
     {
-        // Remove existing file/symlink at linkPath
-        if (File.Exists(linkPath)) File.Delete(linkPath);
-        // Create symlink using ln -s
-        var psi = new System.Diagnostics.ProcessStartInfo
+        try
         {
-            FileName = "/bin/ln",
-            Arguments = $"-sf \"{target}\" \"{linkPath}\"",
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        using var proc = System.Diagnostics.Process.Start(psi);
-        proc?.WaitForExit(3000);
+            if (File.Exists(linkPath) || IsSymlink(linkPath))
+                File.Delete(linkPath);
+
+            File.CreateSymbolicLink(linkPath, target);
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[llama.cpp] Symlink creation warning for {Path.GetFileName(linkPath)}: {ex.Message}");
+        }
     }
 
     private void Rollback(string backupPath, string targetDirectory)
@@ -1093,29 +884,39 @@ public class LlamaCppDownloader : IDisposable
         /// Kill any running llama-server/llama-cpp processes to release file handles before install.
         /// Uses graceful SIGTERM first, then forceful kill as fallback.
         /// </summary>
-        private async Task KillLlamaServerProcessesAsync(string targetDirectory)
+        private async Task KillLlamaServerProcessesAsync(string targetDirectory, CancellationToken ct)
         {
             var serverExe = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? "llama-server.exe"
                 : "llama-server";
+            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
 
-            // Find processes that have the target directory's binary in use
-            var serverPath = Path.Combine(targetDirectory, serverExe);
+            var serverPath = Path.GetFullPath(Path.Combine(targetDirectory, serverExe));
             var processesToKill = new List<Process>();
 
             try
             {
-                foreach (var p in Process.GetProcessesByName("llama-server"))
+                foreach (var process in Process.GetProcessesByName("llama-server"))
                 {
                     try
                     {
-                        if (p.MainModule?.FileName == serverPath ||
-                            p.MainModule?.FileName?.Contains("llama-server") == true)
+                        var processPath = process.MainModule?.FileName;
+                        if (processPath != null &&
+                            string.Equals(Path.GetFullPath(processPath), serverPath, comparison))
                         {
-                            processesToKill.Add(p);
+                            processesToKill.Add(process);
+                        }
+                        else
+                        {
+                            process.Dispose();
                         }
                     }
-                    catch { /* Process may have exited */ }
+                    catch
+                    {
+                        process.Dispose();
+                    }
                 }
             }
             catch { }
@@ -1126,84 +927,83 @@ public class LlamaCppDownloader : IDisposable
                 return;
             }
 
-            LogMessage?.Invoke($"[llama.cpp] Found {processesToKill.Count} llama-server process(es) to stop");
-
-            // Phase 1: Graceful shutdown via SIGTERM/taskkill
-            foreach (var p in processesToKill)
+            try
             {
-                try
+                LogMessage?.Invoke($"[llama.cpp] Found {processesToKill.Count} llama-server process(es) to stop");
+
+                foreach (var process in processesToKill)
                 {
-                    LogMessage?.Invoke($"[llama.cpp] Sending graceful stop to llama-server pid={p.Id}");
-                    if (!p.HasExited)
+                    ct.ThrowIfCancellationRequested();
+
+                    try
                     {
+                        LogMessage?.Invoke($"[llama.cpp] Sending graceful stop to llama-server pid={process.Id}");
+                        if (process.HasExited)
+                            continue;
+
                         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                         {
-                            var psi = new System.Diagnostics.ProcessStartInfo
+                            var startInfo = new ProcessStartInfo
                             {
                                 FileName = "taskkill.exe",
-                                Arguments = $"/T /PID {p.Id}",
-                                UseShellExecute = true,
-                                CreateNoWindow = true,
-                                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+                                Arguments = $"/T /PID {process.Id}",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
                             };
-                            using var tk = Process.Start(psi);
-                            tk?.WaitForExit();
+
+                            using var taskKill = Process.Start(startInfo);
+                            if (taskKill != null)
+                                await taskKill.WaitForExitAsync(ct);
                         }
                         else
                         {
-                            p.Kill(false);
+                            process.Kill(entireProcessTree: false);
                         }
                     }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Graceful stop failed pid={p.Id}: {ex.Message}");
-                }
-            }
-
-            // Wait for processes to exit
-            var deadline = DateTime.Now.AddSeconds(5);
-            foreach (var p in processesToKill)
-            {
-                try
-                {
-                    if (!p.HasExited)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        p.WaitForExit((int)(deadline - DateTime.Now).TotalMilliseconds);
+                        LogMessage?.Invoke($"[llama.cpp] Graceful stop failed pid={process.Id}: {ex.Message}");
                     }
                 }
-                catch { }
-            }
 
-            // Phase 2: Force kill any remaining processes
-            foreach (var p in processesToKill)
-            {
-                try
+                foreach (var process in processesToKill)
                 {
-                    if (!p.HasExited)
+                    try
                     {
-                        LogMessage?.Invoke($"[llama.cpp] Force killing llama-server pid={p.Id}");
-                        p.Kill(entireProcessTree: true);
+                        if (!process.HasExited)
+                            await process.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(5), ct);
+                    }
+                    catch (TimeoutException) { }
+                    catch (InvalidOperationException) { }
+                }
+
+                foreach (var process in processesToKill)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            LogMessage?.Invoke($"[llama.cpp] Force killing llama-server pid={process.Id}");
+                            process.Kill(entireProcessTree: true);
+                            await process.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(2), ct);
+                        }
+                    }
+                    catch (TimeoutException) { }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        LogMessage?.Invoke($"[llama.cpp] Force kill failed pid={process.Id}: {ex.Message}");
                     }
                 }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Force kill failed pid={p.Id}: {ex.Message}");
-                }
-            }
 
-            // Final wait
-            foreach (var p in processesToKill)
+                LogMessage?.Invoke("[llama.cpp] llama-server processes stopped");
+            }
+            finally
             {
-                try
-                {
-                    if (!p.HasExited)
-                        p.WaitForExit(2000);
-                }
-                catch { }
+                foreach (var process in processesToKill)
+                    process.Dispose();
             }
-
-            LogMessage?.Invoke("[llama.cpp] llama-server processes stopped");
         }
 
         // ---- Local Version Detection ----
@@ -1298,6 +1098,7 @@ public class LlamaCppDownloader : IDisposable
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null)
             {
+
                 LogMessage?.Invoke("[llama.cpp] DetectLocalVersion Process.Start returned null");
                 return null;
             }
@@ -1630,22 +1431,19 @@ public class LlamaCppDownloader : IDisposable
             await stream.CopyToAsync(fileStream, 81920, ct);
 
             // Extract to target directory
-            var stagingDir = Path.Combine(_downloadsDir, "cudart-staging");
+            var stagingDir = Path.Combine(_downloadsDir, $"cudart-staging-{Guid.NewGuid():N}");
             Directory.CreateDirectory(stagingDir);
 
             try
             {
-                await ExtractTarGzAsync(tempArchive, stagingDir, ct);
+                ArchiveExtractor.ExtractTarGz(tempArchive, stagingDir, ct);
 
                 // Copy extracted files to target directory
-                CopyDirectoryContents(stagingDir, targetDirectory);
+                CopyDirectoryContents(stagingDir, targetDirectory, ct);
                 LogMessage?.Invoke("[llama.cpp] CUDA runtime libraries installed");
 
                 // Make binaries executable on Unix
-                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    MakeBinariesExecutable(targetDirectory);
-                }
+                MakeBinariesExecutable(targetDirectory, ct);
             }
             finally
             {
@@ -1655,6 +1453,10 @@ public class LlamaCppDownloader : IDisposable
             }
 
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1700,126 +1502,3 @@ public class LlamaCppDownloader : IDisposable
             return false;
         }
     }}
-
-// Minimal tar.gz reader (since System.IO.Compression doesn't include TarFile in .NET 9 on all platforms)
-internal sealed class TarEntry
-{
-    public string Name { get; set; } = "";
-    public bool IsDirectory { get; set; }
-    public System.IO.Stream? DataStream { get; set; }
-}
-
-internal sealed class TarArchive : IDisposable
- {
-     private readonly System.IO.Stream _baseStream;
-     private readonly System.IO.Compression.GZipStream _gzip;
-     private System.IO.BinaryReader? _reader;
-     private readonly Action<string>? _log;
-
-     public System.Collections.Generic.IList<TarEntry> Entries { get; private set; } = new List<TarEntry>();
-
-     public TarArchive(System.IO.Stream baseStream, Action<string>? log = null)
-     {
-         _baseStream = baseStream;
-         _gzip = new System.IO.Compression.GZipStream(baseStream, System.IO.Compression.CompressionMode.Decompress);
-         _reader = new System.IO.BinaryReader(_gzip);
-         _log = log;
-         ParseEntries();
-     }
-
-    private void ParseEntries()
-    {
-        var entries = new List<TarEntry>();
-        var buffer = new byte[512];
-
-        try
-        {
-            while (ReadBlock(buffer))
-            {
-                // Check for end of archive (all zeros)
-                if (buffer.All(b => b == 0))
-                    break;
-
-                var name = System.Text.Encoding.ASCII.GetString(buffer, 0, 100).TrimEnd('\0');
-                var sizeStr = System.Text.Encoding.ASCII.GetString(buffer, 124, 12).TrimEnd('\0');
-                var isDirectory = (buffer[156] & 0xF0) == 0x80; // typeflag '5' = directory
-
-                   long entrySize = 0;
-                // Parse octal size manually (NumberStyles doesn't support Octal)
-                if (!string.IsNullOrWhiteSpace(sizeStr))
-                {
-                    try
-                    {
-                        entrySize = Convert.ToInt64(sizeStr.Trim(), 8);
-                    }
-                    catch { }
-                }
-
-                // Pad to 512-byte boundary
-                var dataPadding = entrySize % 512 == 0 ? 0 : 512 - (entrySize % 512);
-
-                var entry = new TarEntry
-                {
-                    Name = name,
-                    IsDirectory = isDirectory
-                };
-
-                if (!isDirectory && entrySize > 0)
-                {
-                    // Read data into a memory stream
-                    var dataStream = new System.IO.MemoryStream();
-                    var readBuffer = new byte[Math.Min((int)Math.Min(entrySize, 65536), 512)];
-                    var remaining = entrySize;
-
-                    while (remaining > 0)
-                    {
-                        var toRead = (int)Math.Min(remaining, readBuffer.Length);
-                        var bytesRead = _reader!.BaseStream.Read(readBuffer, 0, toRead);
-                        if (bytesRead == 0) break;
-                        dataStream.Write(readBuffer, 0, bytesRead);
-                        remaining -= bytesRead;
-                    }
-
-                    // Skip padding
-                    if (dataPadding > 0)
-                    {
-                        var padBuffer = new byte[dataPadding];
-                        _reader.BaseStream.Read(padBuffer, 0, padBuffer.Length);
-                    }
-
-                    dataStream.Position = 0;
-                    entry.DataStream = dataStream;
-                }
-
-                entries.Add(entry);
-            }
-        }
-        catch (Exception ex)
-              {
-                  _log?.Invoke($"[TarArchive] Parse error: {ex.Message}");
-              }
-
-        Entries = entries;
-    }
-
-    private bool ReadBlock(byte[] buffer)
-    {
-        var totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            var bytesRead = _reader!.BaseStream.Read(buffer, totalRead, buffer.Length - totalRead);
-            if (bytesRead == 0) return totalRead > 0; // partial read at EOF is OK
-            totalRead += bytesRead;
-        }
-        return true;
-    }
-
-    public void Dispose()
-    {
-        _reader?.Dispose();
-        _gzip?.Dispose();
-        _baseStream?.Dispose();
-    }
-
-
-}

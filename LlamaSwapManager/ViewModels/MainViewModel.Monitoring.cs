@@ -186,7 +186,7 @@ public partial class MainViewModel : ObservableObject
         var backends = GpuDetectionSettings.GetAvailableBackends();
         var newBackend = backends.FirstOrDefault(b => $"{b.Name} ({b.Detail})" == SelectedGpuBackend);
 
-        if (newBackend.Backend != GpuDetectionService.GpuBackend.CpuOnly)
+        if (newBackend is not null && newBackend.Backend != GpuDetectionService.GpuBackend.CpuOnly)
         {
             GpuDetectionSettings.PreferredBackend = newBackend.Backend;
             OnLogMessage($"[ui] GPU backend set to: {newBackend.Name}");

@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Formats.Tar;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Security;
@@ -174,7 +172,9 @@ public class UpdateService : IDisposable
                 return false;
             }
 
-            var version = string.IsNullOrEmpty(targetVersion) ? latest.Version : targetVersion;
+            var version = string.IsNullOrWhiteSpace(targetVersion)
+                ? latest.Version ?? "unknown"
+                : targetVersion;
             ProgressChanged?.Invoke(new UpdateProgress($"Found version {version}", 10));
 
             // Step 2: Verify disk space
@@ -511,7 +511,7 @@ public class UpdateService : IDisposable
     {
         try
         {
-            ZipFile.ExtractToDirectory(archivePath, extractDir, overwriteFiles: true);
+            ArchiveExtractor.ExtractZip(archivePath, extractDir);
             return true;
         }
         catch (Exception ex)
@@ -525,9 +525,7 @@ public class UpdateService : IDisposable
     {
         try
         {
-            using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
-            TarFile.ExtractToDirectory(gzipStream, extractDir, overwriteFiles: true);
+            ArchiveExtractor.ExtractTarGz(archivePath, extractDir);
             return true;
         }
         catch (Exception ex)
@@ -537,7 +535,7 @@ public class UpdateService : IDisposable
         }
     }
 
-    private string FindExtractedBinary(string extractDir)
+    private string? FindExtractedBinary(string extractDir)
     {
         var binaryName = GetBinaryName();
         var exePattern = _osName == "windows" ? "*.exe" : "*";
@@ -564,22 +562,18 @@ public class UpdateService : IDisposable
 
     private void SetExecutable(string path)
     {
-        if (_osName != "darwin" && _osName != "linux") return;
+        if (OperatingSystem.IsWindows())
+            return;
 
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "chmod",
-                Arguments = $"+x \"{path}\"",
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            })?.WaitForExit();
+            var mode = File.GetUnixFileMode(path);
+            mode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            File.SetUnixFileMode(path, mode);
         }
         catch (Exception ex)
         {
-            LogMessage?.Invoke($"Warning: chmod failed ({ex.Message})");
+            LogMessage?.Invoke($"Warning: executable permission update failed ({ex.Message})");
         }
     }
 
@@ -594,12 +588,14 @@ public class UpdateService : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName = "codesign",
-                Arguments = $"--verify -vvvv \"{path}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add("--verify");
+            psi.ArgumentList.Add("-vvvv");
+            psi.ArgumentList.Add(path);
 
             using var proc = Process.Start(psi);
             proc?.WaitForExit();
@@ -632,12 +628,14 @@ public class UpdateService : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName = "xattr",
-                Arguments = $"-d com.apple.quarantine \"{path}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add("-d");
+            psi.ArgumentList.Add("com.apple.quarantine");
+            psi.ArgumentList.Add(path);
 
             using var proc = Process.Start(psi);
             proc?.WaitForExit();

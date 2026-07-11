@@ -309,7 +309,11 @@ public class VersionChecker : IDisposable
             return helpVersion;
 
         // Try marker file in ~/.llama/
-        return TryDetectVersionFromMarkerFile();
+        return TryDetectVersionFromMarkerFile() ?? new LocalVersion
+        {
+            BinaryType = BinaryType.LlamaCpp,
+            Status = UpdateStatus.Unknown
+        };
     }
 
     /// <summary>
