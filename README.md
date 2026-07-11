@@ -4,7 +4,7 @@ A desktop control center for `llama-swap`, `llama.cpp`, and local GGUF models.
 
 LlamaDeck gives you one place to configure model profiles, manage the local runtime, build loading combinations, inspect generated configuration, and monitor what is running.
 
-![LlamaDeck models dashboard](docs/images/llamadeck-main.png)
+![LlamaDeck models dashboard](docs/images/llamadeck-main-v2.png)
 
 ## What it does
 
@@ -21,7 +21,7 @@ LlamaDeck gives you one place to configure model profiles, manage the local runt
 
 Define which models can remain loaded together and control their eviction order without editing YAML manually.
 
-![LlamaDeck matrix editor](docs/images/llamadeck-matrix.png)
+![LlamaDeck matrix editor](docs/images/llamadeck-matrix-v2.png)
 
 ## Requirements
 
