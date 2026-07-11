@@ -10,6 +10,7 @@
     <AssemblyTitle>LlamaDeck</AssemblyTitle>
     <Product>LlamaDeck</Product>
     <ApplicationTitle>LlamaDeck</ApplicationTitle>
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <!-- macOS: informa o .app bundle qual icone usar no Dock / Cmd+Tab.

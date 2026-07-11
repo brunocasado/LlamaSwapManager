@@ -273,7 +273,12 @@ public partial class MainViewModel : ObservableObject
             ? Path.GetDirectoryName(_processManager.ExecutablePath)!
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
         var llamaCppDir = _processManager.LlamaCppDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
-        UpdateViewModel = new UpdateViewModel(updateDir, llamaCppDir, message => OnLogMessage(message), CudaVersion);
+        UpdateViewModel = new UpdateViewModel(
+            updateDir,
+            llamaCppDir,
+            message => OnLogMessage(message),
+            CudaVersion,
+            QuitApplicationAsync);
 
         // Detect GPU backends
         DetectGpuBackends();

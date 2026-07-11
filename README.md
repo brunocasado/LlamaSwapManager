@@ -14,7 +14,7 @@ LlamaDeck gives you one place to configure model profiles, manage the local runt
 
 Download the latest build from [GitHub Releases](https://github.com/brunocasado/LlamaDeck/releases/latest).
 
-Release archives are self-contained and do not require the .NET SDK. LlamaDeck itself does not bundle `llama.cpp`, `llama-swap`, or model files.
+Release archives are self-contained and do not require the .NET SDK. Packaged builds can check and install newer stable releases directly from GitHub tags. LlamaDeck itself does not bundle `llama.cpp`, `llama-swap`, or model files.
 
 > macOS builds are currently ad-hoc signed, not notarized. On first launch, macOS may require you to approve the app in Privacy & Security.
 
@@ -27,7 +27,8 @@ Release archives are self-contained and do not require the .NET SDK. LlamaDeck i
 - Build model-loading combinations and eviction priorities visually.
 - Preview and save the generated `config.yml`.
 - View runtime metrics, loaded models, and application logs.
-- Check for LlamaDeck, `llama-swap`, and `llama.cpp` updates.
+- Check and install LlamaDeck updates from stable GitHub release tags.
+- Check for and install compatible `llama-swap` and `llama.cpp` updates.
 
 ## Model combinations
 

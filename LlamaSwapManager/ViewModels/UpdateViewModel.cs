@@ -19,11 +19,23 @@ namespace LlamaSwapManager.ViewModels;
 public partial class UpdateViewModel : ObservableObject, IDisposable
 {
     private readonly UpdateService _updateService;
+    private readonly LlamaDeckUpdateService _llamaDeckUpdateService;
     private readonly LlamaCppDownloader _llamaCppDownloader;
     private readonly Action<string>? _logMessage;
     private readonly string? _preferredCudaVersion;
+    private readonly Func<Task>? _requestApplicationExit;
+    private LlamaDeckUpdateInfo? _llamaDeckUpdate;
     private CancellationTokenSource? _updateCts;
     private bool _disposed;
+
+    // LlamaDeck version info
+    [ObservableProperty] private string _llamaDeckCurrentVersion = "Unknown";
+    [ObservableProperty] private string _llamaDeckLatestVersion = "";
+    [ObservableProperty] private bool _isLlamaDeckUpdateAvailable;
+    [ObservableProperty] private string _llamaDeckStatusText = "";
+    [ObservableProperty] private string _llamaDeckStatusColor = "#888888";
+    [ObservableProperty] private bool _llamaDeckCheckButtonEnabled = true;
+    [ObservableProperty] private bool _llamaDeckUpdateButtonEnabled;
 
     // llama-swap version info
     [ObservableProperty] private string _currentVersion = "Unknown";
@@ -54,36 +66,185 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
     public string InstallDirectory { get; }
     public string LlamaCppDirectory { get; }
 
+    public ICommand LlamaDeckCheckCommand { get; }
+    public ICommand LlamaDeckUpdateCommand { get; }
     public ICommand CheckCommand { get; }
     public ICommand UpdateCommand { get; }
     public ICommand LlamaCppCheckCommand { get; }
     public ICommand LlamaCppUpdateCommand { get; }
 
-    public UpdateViewModel(string installDirectory, string? llamaCppDirectory = null, Action<string>? logMessage = null, string? preferredCudaVersion = null)
+    public UpdateViewModel(
+        string installDirectory,
+        string? llamaCppDirectory = null,
+        Action<string>? logMessage = null,
+        string? preferredCudaVersion = null,
+        Func<Task>? requestApplicationExit = null)
     {
         InstallDirectory = installDirectory;
         LlamaCppDirectory = llamaCppDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
         _logMessage = logMessage;
         _updateService = new UpdateService(installDirectory);
+        _llamaDeckUpdateService = new LlamaDeckUpdateService();
         _llamaCppDownloader = new LlamaCppDownloader();
         _preferredCudaVersion = preferredCudaVersion;
+        _requestApplicationExit = requestApplicationExit;
 
         _updateService.ProgressChanged += OnProgressChanged;
         _updateService.LogMessage += OnLogMessage;
         _llamaCppDownloader.LogMessage += OnLogMessage;
 
+        LlamaDeckCheckCommand = new AsyncRelayCommand(CheckLlamaDeckUpdatesInternalAsync);
+        LlamaDeckUpdateCommand = new AsyncRelayCommand(ExecuteLlamaDeckUpdateAsync);
         CheckCommand = new AsyncRelayCommand(CheckForUpdatesInternalAsync);
         UpdateCommand = new AsyncRelayCommand(ExecuteUpdateAsync);
         LlamaCppCheckCommand = new AsyncRelayCommand(CheckLlamaCppUpdatesInternalAsync);
         LlamaCppUpdateCommand = new AsyncRelayCommand(ExecuteLlamaCppUpdateAsync);
 
         UpdateButtonEnabled = false;
+        _ = CheckLlamaDeckUpdatesInternalAsync();
         _ = CheckForUpdatesInternalAsync();
         _ = CheckLlamaCppUpdatesInternalAsync();
     }
 
+    private async Task CheckLlamaDeckUpdatesInternalAsync()
+    {
+        if (IsUpdating) return;
+
+        LlamaDeckCheckButtonEnabled = false;
+        LlamaDeckStatusText = "Checking for updates...";
+        LlamaDeckStatusColor = "#89B4FA";
+
+        try
+        {
+            _llamaDeckUpdate = await _llamaDeckUpdateService.CheckAsync();
+            if (_llamaDeckUpdate is null)
+            {
+                LlamaDeckStatusText = "Could not check for updates";
+                LlamaDeckStatusColor = "#F38BA8";
+                IsLlamaDeckUpdateAvailable = false;
+                LlamaDeckUpdateButtonEnabled = false;
+                return;
+            }
+
+            LlamaDeckCurrentVersion = _llamaDeckUpdate.CurrentVersion;
+            LlamaDeckLatestVersion = _llamaDeckUpdate.LatestVersion;
+            IsLlamaDeckUpdateAvailable = _llamaDeckUpdate.IsUpdateAvailable;
+
+            if (!_llamaDeckUpdate.IsUpdateAvailable)
+            {
+                LlamaDeckStatusText = "Already up to date";
+                LlamaDeckStatusColor = "#A6E3A1";
+                LlamaDeckUpdateButtonEnabled = false;
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_llamaDeckUpdate.AssetUrl))
+            {
+                LlamaDeckStatusText = "Update available, but no compatible package was found";
+                LlamaDeckStatusColor = "#F9E2AF";
+                LlamaDeckUpdateButtonEnabled = false;
+                return;
+            }
+
+            if (!_llamaDeckUpdateService.CanInstallUpdate)
+            {
+                LlamaDeckStatusText = $"Update {_llamaDeckUpdate.LatestVersion} available. Install it from GitHub Releases.";
+                LlamaDeckStatusColor = "#F9E2AF";
+                LlamaDeckUpdateButtonEnabled = false;
+                return;
+            }
+
+            LlamaDeckStatusText = $"Update {_llamaDeckUpdate.LatestVersion} available";
+            LlamaDeckStatusColor = "#F9E2AF";
+            LlamaDeckUpdateButtonEnabled = true;
+        }
+        catch (Exception ex)
+        {
+            LlamaDeckStatusText = $"Error: {ex.Message}";
+            LlamaDeckStatusColor = "#F38BA8";
+            IsLlamaDeckUpdateAvailable = false;
+            LlamaDeckUpdateButtonEnabled = false;
+            OnLogMessage($"LlamaDeck update check failed: {ex.Message}");
+        }
+        finally
+        {
+            LlamaDeckCheckButtonEnabled = true;
+        }
+    }
+
+    private async Task ExecuteLlamaDeckUpdateAsync()
+    {
+        if (IsUpdating) return;
+
+        if (_llamaDeckUpdate is null || !_llamaDeckUpdate.IsUpdateAvailable)
+        {
+            await CheckLlamaDeckUpdatesInternalAsync();
+            if (_llamaDeckUpdate is null || !_llamaDeckUpdate.IsUpdateAvailable)
+                return;
+        }
+
+        IsUpdating = true;
+        LlamaDeckCheckButtonEnabled = false;
+        LlamaDeckUpdateButtonEnabled = false;
+        ProgressText = "Starting LlamaDeck update...";
+        ProgressPercentage = 0;
+        _updateCts = new CancellationTokenSource();
+
+        try
+        {
+            var progress = new Progress<(string Message, int Percentage)>(value =>
+            {
+                ProgressText = value.Message;
+                ProgressPercentage = value.Percentage;
+            });
+            var prepared = await _llamaDeckUpdateService.DownloadAndPrepareAsync(
+                _llamaDeckUpdate,
+                progress,
+                _updateCts.Token);
+
+            if (!prepared)
+            {
+                LlamaDeckStatusText = "Update could not be prepared";
+                LlamaDeckStatusColor = "#F38BA8";
+                LlamaDeckUpdateButtonEnabled = true;
+                return;
+            }
+
+            LlamaDeckStatusText = "Update downloaded. Restarting LlamaDeck...";
+            LlamaDeckStatusColor = "#A6E3A1";
+            OnLogMessage($"LlamaDeck {_llamaDeckUpdate.LatestVersion} is ready to install");
+
+            if (_requestApplicationExit is not null)
+                await _requestApplicationExit();
+            else
+                LlamaDeckStatusText = "Update ready. Close LlamaDeck to finish installation.";
+        }
+        catch (OperationCanceledException)
+        {
+            LlamaDeckStatusText = "Update cancelled";
+            LlamaDeckStatusColor = "#F9E2AF";
+            LlamaDeckUpdateButtonEnabled = true;
+        }
+        catch (Exception ex)
+        {
+            LlamaDeckStatusText = $"Error: {ex.Message}";
+            LlamaDeckStatusColor = "#F38BA8";
+            LlamaDeckUpdateButtonEnabled = true;
+            OnLogMessage($"LlamaDeck update failed: {ex.Message}");
+        }
+        finally
+        {
+            IsUpdating = false;
+            LlamaDeckCheckButtonEnabled = true;
+            _updateCts?.Dispose();
+            _updateCts = null;
+        }
+    }
+
     private async Task CheckForUpdatesInternalAsync()
     {
+        if (IsUpdating) return;
+
         CheckButtonEnabled = false;
         UpdateStatusText = "Checking for updates...";
         UpdateStatusColor = "#89B4FA";
@@ -192,6 +353,8 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
     private async Task CheckLlamaCppUpdatesInternalAsync()
     {
+        if (IsUpdating) return;
+
         LlamaCppCheckButtonEnabled = false;
         LlamaCppStatusText = "Checking for updates...";
         LlamaCppStatusColor = "#89B4FA";
@@ -244,6 +407,8 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
     private async Task ExecuteLlamaCppUpdateAsync()
     {
+        if (IsUpdating) return;
+
         IsUpdating = true;
         LlamaCppCheckButtonEnabled = false;
         LlamaCppUpdateButtonEnabled = false;
@@ -297,6 +462,8 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
     private async Task ExecuteUpdateAsync()
     {
+        if (IsUpdating) return;
+
         IsUpdating = true;
         CheckButtonEnabled = false;
         UpdateButtonEnabled = false;
@@ -377,6 +544,7 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
         _disposed = true;
         _updateCts?.Dispose();
         _updateService?.Dispose();
+        _llamaDeckUpdateService.Dispose();
         _llamaCppDownloader?.Dispose();
     }
 }

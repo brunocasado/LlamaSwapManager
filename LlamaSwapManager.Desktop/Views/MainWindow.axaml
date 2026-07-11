@@ -684,12 +684,54 @@
           <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
             <StackPanel Spacing="4">
               <TextBlock Text="Updates" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-              <TextBlock Text="llama-swap and llama.cpp releases." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
+              <TextBlock Text="LlamaDeck, llama-swap, and llama.cpp releases." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
           <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
           <StackPanel Spacing="16" DataContext="{Binding UpdateViewModel}">
-            <!-- Header -->
+            <!-- LlamaDeck self-update -->
+            <Border Padding="16" Background="#161622" CornerRadius="8">
+              <StackPanel Spacing="6">
+                <TextBlock Text="LlamaDeck Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
+                <TextBlock Text="Update LlamaDeck from the latest stable GitHub release tag." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Border Padding="16" Background="#161622" CornerRadius="8">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="6">
+                  <Grid ColumnDefinitions="140,*,140,*" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0" Text="Current" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding LlamaDeckCurrentVersion}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
+                    <TextBlock Grid.Column="2" Text="Latest" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding LlamaDeckLatestVersion}" FontSize="14" FontWeight="Bold" Foreground="#89B4FA" />
+                  </Grid>
+                  <TextBlock Text="{Binding LlamaDeckStatusText}" FontSize="12" Foreground="{Binding LlamaDeckStatusColor}" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <Button Content="Check"
+                          Command="{Binding LlamaDeckCheckCommand}"
+                          Padding="14,7"
+                          IsEnabled="{Binding LlamaDeckCheckButtonEnabled}" />
+                  <Button Content="Update"
+                          Command="{Binding LlamaDeckUpdateCommand}"
+                          Classes="success"
+                          Padding="14,7"
+                          IsEnabled="{Binding LlamaDeckUpdateButtonEnabled}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <!-- Shared update progress -->
+            <Border Padding="16" Background="#161622" CornerRadius="8" IsVisible="{Binding IsUpdating}">
+              <StackPanel Spacing="10">
+                <TextBlock Text="Installation Progress" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
+                <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="8" />
+                <TextBlock Text="{Binding ProgressText}" FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <!-- llama-swap Header -->
             <Border Padding="16" Background="#161622" CornerRadius="8">
               <StackPanel Spacing="6">
                 <TextBlock Text="llama-swap Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
@@ -721,15 +763,6 @@
                           IsEnabled="{Binding UpdateButtonEnabled}" />
                 </StackPanel>
               </Grid>
-            </Border>
-
-            <!-- Progress -->
-            <Border Padding="16" Background="#161622" CornerRadius="8" IsVisible="{Binding IsUpdating}">
-              <StackPanel Spacing="10">
-                <TextBlock Text="Installation Progress" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="8" />
-                <TextBlock Text="{Binding ProgressText}" FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
-              </StackPanel>
             </Border>
 
             <!-- Install info -->
