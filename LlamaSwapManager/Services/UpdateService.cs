@@ -25,6 +25,7 @@ public class UpdateService : IDisposable
     private const long MinDiskSpaceBytes = 500L * 1024 * 1024; // 500MB minimum free
 
     private readonly HttpClient _httpClient;
+    private readonly GitHubReleaseClient _releaseClient;
     private readonly string _installDirectory;
     private readonly string _osName;
     private readonly string _arch;
@@ -59,6 +60,17 @@ public class UpdateService : IDisposable
         _httpClient = CreateSecureHttpClient();
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaSwapManager/1.0");
+
+        var cacheDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".llama-swap",
+            ".updates",
+            "github-cache");
+        _releaseClient = new GitHubReleaseClient(
+            _httpClient,
+            GitHubRepo,
+            cacheDirectory,
+            message => LogMessage?.Invoke(message));
     }
 
     /// <summary>
@@ -102,17 +114,15 @@ public class UpdateService : IDisposable
     {
         try
         {
-            var response = await _httpClient.GetAsync(
-                $"https://api.github.com/repos/{GitHubRepo}/releases/latest", ct);
-
-            if (!response.IsSuccessStatusCode)
+            var releaseJson = await _releaseClient.GetLatestReleaseAsync(ct);
+            if (releaseJson is null)
             {
-                LogMessage?.Invoke($"Failed to check for updates: {(int)response.StatusCode} {response.StatusCode}");
+                LogMessage?.Invoke("Could not retrieve GitHub release information");
                 return null;
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
-            var release = System.Text.Json.JsonSerializer.Deserialize<JsonRelease>(json);
+            var release = System.Text.Json.JsonSerializer.Deserialize<JsonRelease>(
+                releaseJson.Value.GetRawText());
             if (release == null) return null;
 
             // Find the asset for this platform/arch — strict matching

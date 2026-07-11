@@ -24,9 +24,17 @@ public class UpdateServiceIntegrationTests
         _output = output;
     }
 
+    private static bool LiveGitHubTestsEnabled =>
+        string.Equals(
+            Environment.GetEnvironmentVariable("RUN_LIVE_GITHUB_TESTS"),
+            "1",
+            StringComparison.Ordinal);
+
     [Fact]
     public async Task CheckForUpdatesAsync_ReturnsLatestVersion()
     {
+        if (!LiveGitHubTestsEnabled) return;
+
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), $"update-test-{Guid.NewGuid()}");
         Directory.CreateDirectory(tempDir);
@@ -64,6 +72,8 @@ public class UpdateServiceIntegrationTests
     [Fact]
     public async Task UpdateAsync_DownloadsAndExtractsCorrectly()
     {
+        if (!LiveGitHubTestsEnabled) return;
+
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), $"update-extract-{Guid.NewGuid()}");
         var installDir = Path.Combine(tempDir, "install");
@@ -117,6 +127,8 @@ public class UpdateServiceIntegrationTests
      [Fact]
     public async Task UpdateAsync_VerifiesChecksum()
     {
+        if (!LiveGitHubTestsEnabled) return;
+
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), $"update-checksum-{Guid.NewGuid()}");
         var installDir = Path.Combine(tempDir, "install");
@@ -149,6 +161,8 @@ public class UpdateServiceIntegrationTests
     [Fact]
     public async Task LlamaCppDownloader_DownloadAndInstallAsync_Works()
     {
+        if (!LiveGitHubTestsEnabled) return;
+
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), $"llamacpp-update-{Guid.NewGuid()}");
         var installDir = Path.Combine(tempDir, "install");
