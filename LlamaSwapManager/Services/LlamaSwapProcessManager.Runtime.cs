@@ -278,7 +278,7 @@ public partial class LlamaSwapProcessManager : IDisposable
                 if (parts.Length == 0)
                     continue;
 
-                var endpoint = parts.Reverse().FirstOrDefault(part => part.Contains(':'));
+                var endpoint = parts.LastOrDefault(part => part.Contains(':'));
                 if (endpoint is not null && TryParsePort(endpoint, out var port))
                     ports.Add(port);
             }

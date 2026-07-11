@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://github.com/brunocasado/LlamaDeck/discussions
+    about: Ask usage and setup questions in Discussions.
+  - name: Upstream llama.cpp issues
+    url: https://github.com/ggml-org/llama.cpp/issues
+    about: Report llama.cpp runtime problems to the upstream project.
+  - name: Upstream llama-swap issues
+    url: https://github.com/mostlygeek/llama-swap/issues
+    about: Report llama-swap runtime problems to the upstream project.

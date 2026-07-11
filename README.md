@@ -1,10 +1,22 @@
 # LlamaDeck
 
+[![CI](https://github.com/brunocasado/LlamaDeck/actions/workflows/ci.yml/badge.svg)](https://github.com/brunocasado/LlamaDeck/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/brunocasado/LlamaDeck?display_name=tag&sort=semver)](https://github.com/brunocasado/LlamaDeck/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A desktop control center for `llama-swap`, `llama.cpp`, and local GGUF models.
 
 LlamaDeck gives you one place to configure model profiles, manage the local runtime, build loading combinations, inspect generated configuration, and monitor what is running.
 
 ![LlamaDeck models dashboard](docs/images/llamadeck-main-v2.png)
+
+## Download
+
+Download the latest build from [GitHub Releases](https://github.com/brunocasado/LlamaDeck/releases/latest).
+
+Release archives are self-contained and do not require the .NET SDK. LlamaDeck itself does not bundle `llama.cpp`, `llama-swap`, or model files.
+
+> macOS builds are currently ad-hoc signed, not notarized. On first launch, macOS may require you to approve the app in Privacy & Security.
 
 ## What it does
 

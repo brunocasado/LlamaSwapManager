@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore LlamaSwapManager.slnx
+
+      - name: Build core
+        run: dotnet build LlamaSwapManager/LlamaSwapManager.csproj --configuration Release --no-restore
+
+      - name: Build desktop
+        run: dotnet build LlamaSwapManager.Desktop/LlamaSwapManager.Desktop.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Tests/LlamaSwapManager.Tests/LlamaSwapManager.Tests.csproj --configuration Release --no-restore --logger "console;verbosity=normal"
