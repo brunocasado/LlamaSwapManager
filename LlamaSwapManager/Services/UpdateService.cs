@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Formats.Tar;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Security;
@@ -511,7 +509,7 @@ public class UpdateService : IDisposable
     {
         try
         {
-            ZipFile.ExtractToDirectory(archivePath, extractDir, overwriteFiles: true);
+            ArchiveExtractor.ExtractZip(archivePath, extractDir);
             return true;
         }
         catch (Exception ex)
@@ -525,9 +523,7 @@ public class UpdateService : IDisposable
     {
         try
         {
-            using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
-            TarFile.ExtractToDirectory(gzipStream, extractDir, overwriteFiles: true);
+            ArchiveExtractor.ExtractTarGz(archivePath, extractDir);
             return true;
         }
         catch (Exception ex)

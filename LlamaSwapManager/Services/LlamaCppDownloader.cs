@@ -498,6 +498,7 @@ public class LlamaCppDownloader : IDisposable
             while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
             {
                 await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+
                 totalRead += bytesRead;
 
                 if (totalBytes > 0 && progress != null)
@@ -601,12 +602,12 @@ public class LlamaCppDownloader : IDisposable
 
             if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                await ExtractZipAsync(archivePath, stagingDir, ct);
+                ArchiveExtractor.ExtractZip(archivePath, stagingDir, ct);
             }
             else if (archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
                      archivePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
             {
-                await ExtractTarGzAsync(archivePath, stagingDir, ct);
+                ArchiveExtractor.ExtractTarGz(archivePath, stagingDir, ct);
             }
             else
             {
@@ -685,230 +686,7 @@ public class LlamaCppDownloader : IDisposable
         }
     }
 
-    private async Task ExtractZipAsync(string archivePath, string destinationDir, CancellationToken ct)
-    {
-        // Handle zip files that may have a top-level directory
-        using var archive = ZipFile.OpenRead(archivePath);
-        var entries = archive.Entries.ToList();
-
-        // Check if all entries share a common top-level directory
-        var topDir = GetTopLevelDirectory(entries);
-
-        foreach (var entry in entries)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            // Skip empty directories
-            if (entry.Length == 0 && string.IsNullOrEmpty(entry.Name))
-                continue;
-
-            // Remove top-level directory prefix if present
-            var targetPath = topDir != null && entry.FullName.StartsWith(topDir)
-                ? entry.FullName.Substring(topDir.Length).TrimStart('/', '\\')
-                : entry.FullName;
-
-            if (string.IsNullOrEmpty(targetPath))
-                continue;
-
-            var fullPath = Path.Combine(destinationDir, targetPath);
-            var fullDir = Path.GetDirectoryName(fullPath);
-            if (!string.IsNullOrEmpty(fullDir) && !Directory.Exists(fullDir))
-                Directory.CreateDirectory(fullDir);
-
-            entry.ExtractToFile(fullPath, overwrite: true);
-        }
-    }
-
-    private async Task ExtractTarGzAsync(string archivePath, string destinationDir, CancellationToken ct)
-    {
-        // Decompress gzip and parse tar manually — more reliable than custom TarArchive
-        using var archive = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var gzip = new GZipStream(archive, CompressionMode.Decompress);
-        
-        // Extract top-level directory from archive filename (e.g., llama-b9660-bin-macos-arm64.tar.gz → llama-b9660/)
-          var archiveName = Path.GetFileName(archivePath); // llama-b9660-bin-macos-arm64.tar.gz
-          // Remove .tar.gz or .tgz
-          archiveName = System.Text.RegularExpressions.Regex.Replace(archiveName, @"\.tar\.gz$|\.tgz$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-          // llama-b9660-bin-macos-arm64
-          // Remove known suffixes: -bin-macos-arm64, -bin-linux-x64, etc.
-          archiveName = System.Text.RegularExpressions.Regex.Replace(archiveName, @"-bin-(?:macos|linux|windows)-?(?:arm64|x64|x86_64)?$", "");
-          // Remove trailing -macos, -linux, -windows if present
-          archiveName = System.Text.RegularExpressions.Regex.Replace(archiveName, @"-(?:macos|linux|windows)$", "");
-          var topDir = archiveName + "/";
-        
-        // Read all decompressed tar data into memory
-        var tarData = new byte[81920];
-        var totalRead = 0;
-        int bytesRead;
-        while ((bytesRead = await gzip.ReadAsync(tarData, totalRead, tarData.Length - totalRead, ct)) > 0)
-        {
-            totalRead += bytesRead;
-            if (totalRead == tarData.Length)
-            {
-                Array.Resize(ref tarData, tarData.Length * 2);
-            }
-        }
-        if (totalRead < tarData.Length)
-        {
-            Array.Resize(ref tarData, totalRead);
-        }
-        
-        LogMessage?.Invoke($"[llama.cpp] Top-level directory: '{topDir}' (from '{archivePath}')");
-            
-            // Parse tar entries (512-byte blocks)
-        var offset = 0;
-        var blockCount = tarData.Length / 512;
-        var entriesFound = 0;
-        
-        for (var i = 0; i < blockCount; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            
-            // Check for end-of-archive (two blocks of 512 zero bytes) — only at the very end
-            if (i + 2 >= blockCount)
-            {
-                var allZero = true;
-                for (var b = 0; b < 1024; b++)
-                {
-                    if (tarData[offset + b] != 0) { allZero = false; break; }
-                }
-                if (allZero) break;
-            }
-            
-            // Parse header
-            var name = System.Text.Encoding.ASCII.GetString(tarData, offset, 100).TrimEnd('\0');
-            if (string.IsNullOrEmpty(name)) { offset += 512; continue; }
-            
-            // Skip invalid entries (Mach-O segments have garbage names with null chars)
-            if (name.IndexOf('\0') >= 0 || name.Any(c => c < 32 && c != '\0'))
-            {
-                offset += 512;
-                continue;
-            }
-            
-            entriesFound++;
-            
-            // Type flag at offset 156 — 0 or empty = regular file, 5 = directory
-            var typeFlag = (char)tarData[offset + 156];
-            var isDirectory = typeFlag == '5';
-            
-            // Size at offset 124, 12 bytes octal
-            var sizeStr = System.Text.Encoding.ASCII.GetString(tarData, offset + 124, 12).TrimEnd('\0', ' ');
-            long fileSize = 0;
-            try { fileSize = Convert.ToInt64(sizeStr, 8); } catch { }
-            
-            // Remove top-level directory prefix (from filename, not from parsing)
-            var targetPath = name;
-            if (name.StartsWith(topDir))
-            {
-                targetPath = name.Substring(topDir.Length).TrimStart('/');
-            }
-            // Skip the top-level directory entry itself (don't create subdirectory)
-            if (string.IsNullOrEmpty(targetPath))
-            {
-                offset += 512;
-                continue;
-            }
-            
-            var fullPath = Path.Combine(destinationDir, targetPath);
-            
-            if (isDirectory)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Tar entry (dir): {name} -> {fullPath}");
-                Directory.CreateDirectory(fullPath);
-            }
-            else if (fileSize > 0)
-            {
-                var fullDir = Path.GetDirectoryName(fullPath);
-                if (!string.IsNullOrEmpty(fullDir) && !Directory.Exists(fullDir))
-                    Directory.CreateDirectory(fullDir);
-                
-                LogMessage?.Invoke($"[llama.cpp] Tar entry (file): {name} -> {fullPath} ({fileSize} bytes)");
-                
-                using var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                var dataOffset = offset + 512;
-                var remaining = fileSize;
-                var buffer = new byte[Math.Min((int)Math.Min(remaining, 65536), 81920)];
-                var totalWritten = 0;
-                
-                while (remaining > 0)
-                {
-                    var toRead = (int)Math.Min(remaining, buffer.Length);
-                    if (dataOffset + toRead > tarData.Length) break;
-                    await fs.WriteAsync(tarData, dataOffset, toRead, ct);
-                    dataOffset += toRead;
-                    remaining -= toRead;
-                    totalWritten += toRead;
-                }
-                
-                if (name.Contains("llama-server"))
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Extracted llama-server: {totalWritten} bytes (expected {fileSize})");
-                }
-                
-                // Skip padding to 512-byte boundary
-                var dataPadding = fileSize % 512;
-                if (dataPadding > 0)
-                {
-                    dataOffset += (int)(512 - dataPadding);
-                }
-            }
-            
-            offset += 512;
-        }
-        
-        LogMessage?.Invoke($"[llama.cpp] Extracted {entriesFound} entries to {destinationDir}");
-    }
-
-    private string? GetTopLevelDirectory(System.Collections.Generic.IList<ZipArchiveEntry> entries)
-    {
-        if (entries.Count == 0) return null;
-
-        // Find the common prefix of all non-empty entry paths
-        var firstPath = entries[0].FullName;
-        var firstSlash = firstPath.IndexOf('/');
-        var firstBackslash = firstPath.IndexOf('\\');
-        var firstSlashIdx = Math.Max(firstSlash, firstBackslash);
-
-        if (firstSlashIdx <= 0) return null; // No top-level directory
-
-        var candidate = firstPath.Substring(0, firstSlashIdx + 1);
-
-        // Verify all entries start with this prefix
-        foreach (var entry in entries)
-        {
-            if (!entry.FullName.StartsWith(candidate, StringComparison.Ordinal) && !string.IsNullOrEmpty(entry.FullName))
-            {
-                return null;
-            }
-        }
-
-        return candidate;
-    }
-
-    private string? GetTopLevelDirectoryFromTar(System.Collections.Generic.IList<TarEntry> entries)
-    {
-        if (entries.Count == 0) return null;
-
-        var firstPath = entries[0].Name;
-        var firstSlash = firstPath.IndexOf('/');
-
-        if (firstSlash <= 0) return null;
-
-        var candidate = firstPath.Substring(0, firstSlash + 1);
-
-        foreach (var entry in entries)
-        {
-            if (!string.IsNullOrEmpty(entry.Name) && !entry.Name.StartsWith(candidate, StringComparison.Ordinal))
-            {
-                return null;
-            }
-        }
-
-        return candidate;
-    }
-
-    private void CopyDirectoryContents(string sourceDir, string targetDir)
+private void CopyDirectoryContents(string sourceDir, string targetDir)
     {
         foreach (var file in Directory.GetFiles(sourceDir))
         {
@@ -1298,6 +1076,7 @@ public class LlamaCppDownloader : IDisposable
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null)
             {
+
                 LogMessage?.Invoke("[llama.cpp] DetectLocalVersion Process.Start returned null");
                 return null;
             }
@@ -1635,7 +1414,7 @@ public class LlamaCppDownloader : IDisposable
 
             try
             {
-                await ExtractTarGzAsync(tempArchive, stagingDir, ct);
+                ArchiveExtractor.ExtractTarGz(tempArchive, stagingDir, ct);
 
                 // Copy extracted files to target directory
                 CopyDirectoryContents(stagingDir, targetDirectory);
@@ -1700,126 +1479,3 @@ public class LlamaCppDownloader : IDisposable
             return false;
         }
     }}
-
-// Minimal tar.gz reader (since System.IO.Compression doesn't include TarFile in .NET 9 on all platforms)
-internal sealed class TarEntry
-{
-    public string Name { get; set; } = "";
-    public bool IsDirectory { get; set; }
-    public System.IO.Stream? DataStream { get; set; }
-}
-
-internal sealed class TarArchive : IDisposable
- {
-     private readonly System.IO.Stream _baseStream;
-     private readonly System.IO.Compression.GZipStream _gzip;
-     private System.IO.BinaryReader? _reader;
-     private readonly Action<string>? _log;
-
-     public System.Collections.Generic.IList<TarEntry> Entries { get; private set; } = new List<TarEntry>();
-
-     public TarArchive(System.IO.Stream baseStream, Action<string>? log = null)
-     {
-         _baseStream = baseStream;
-         _gzip = new System.IO.Compression.GZipStream(baseStream, System.IO.Compression.CompressionMode.Decompress);
-         _reader = new System.IO.BinaryReader(_gzip);
-         _log = log;
-         ParseEntries();
-     }
-
-    private void ParseEntries()
-    {
-        var entries = new List<TarEntry>();
-        var buffer = new byte[512];
-
-        try
-        {
-            while (ReadBlock(buffer))
-            {
-                // Check for end of archive (all zeros)
-                if (buffer.All(b => b == 0))
-                    break;
-
-                var name = System.Text.Encoding.ASCII.GetString(buffer, 0, 100).TrimEnd('\0');
-                var sizeStr = System.Text.Encoding.ASCII.GetString(buffer, 124, 12).TrimEnd('\0');
-                var isDirectory = (buffer[156] & 0xF0) == 0x80; // typeflag '5' = directory
-
-                   long entrySize = 0;
-                // Parse octal size manually (NumberStyles doesn't support Octal)
-                if (!string.IsNullOrWhiteSpace(sizeStr))
-                {
-                    try
-                    {
-                        entrySize = Convert.ToInt64(sizeStr.Trim(), 8);
-                    }
-                    catch { }
-                }
-
-                // Pad to 512-byte boundary
-                var dataPadding = entrySize % 512 == 0 ? 0 : 512 - (entrySize % 512);
-
-                var entry = new TarEntry
-                {
-                    Name = name,
-                    IsDirectory = isDirectory
-                };
-
-                if (!isDirectory && entrySize > 0)
-                {
-                    // Read data into a memory stream
-                    var dataStream = new System.IO.MemoryStream();
-                    var readBuffer = new byte[Math.Min((int)Math.Min(entrySize, 65536), 512)];
-                    var remaining = entrySize;
-
-                    while (remaining > 0)
-                    {
-                        var toRead = (int)Math.Min(remaining, readBuffer.Length);
-                        var bytesRead = _reader!.BaseStream.Read(readBuffer, 0, toRead);
-                        if (bytesRead == 0) break;
-                        dataStream.Write(readBuffer, 0, bytesRead);
-                        remaining -= bytesRead;
-                    }
-
-                    // Skip padding
-                    if (dataPadding > 0)
-                    {
-                        var padBuffer = new byte[dataPadding];
-                        _reader.BaseStream.Read(padBuffer, 0, padBuffer.Length);
-                    }
-
-                    dataStream.Position = 0;
-                    entry.DataStream = dataStream;
-                }
-
-                entries.Add(entry);
-            }
-        }
-        catch (Exception ex)
-              {
-                  _log?.Invoke($"[TarArchive] Parse error: {ex.Message}");
-              }
-
-        Entries = entries;
-    }
-
-    private bool ReadBlock(byte[] buffer)
-    {
-        var totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            var bytesRead = _reader!.BaseStream.Read(buffer, totalRead, buffer.Length - totalRead);
-            if (bytesRead == 0) return totalRead > 0; // partial read at EOF is OK
-            totalRead += bytesRead;
-        }
-        return true;
-    }
-
-    public void Dispose()
-    {
-        _reader?.Dispose();
-        _gzip?.Dispose();
-        _baseStream?.Dispose();
-    }
-
-
-}
