@@ -124,8 +124,8 @@
     </Border>
 
     <!-- CONTENT -->
-    <Border Grid.Row="1" Grid.Column="1" Background="#101018">
-      <Panel>
+    <Border Grid.Row="1" Grid.Column="1" Background="#101018" ClipToBounds="True">
+      <Grid>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=models}">
 
         <Grid>
@@ -532,7 +532,7 @@
         </Grid>
 
         </Panel>
-        <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=settings}">
+        <Grid IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=settings}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ClipToBounds="True">
 
         <Grid RowDefinitions="Auto,*">
           <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
@@ -541,7 +541,7 @@
               <TextBlock Text="Paths, GPU backend and global runtime options." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
-          <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
           <StackPanel Spacing="16" Margin="0,0,0,40">
             <!-- Paths -->
             <Border Padding="16" Background="#161622" CornerRadius="8">
@@ -663,162 +663,506 @@
               </StackPanel>
             </Border>
 
-            <!-- Info -->
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <StackPanel Spacing="8">
-                <TextBlock Text="Tips" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                <TextBlock Text="• Matrix uses &amp; for models loaded together" FontSize="11" Foreground="#A6ADC8" />
-                <TextBlock Text="• Vars map short names (q, m, d, t, e) to full model IDs" FontSize="11" Foreground="#A6ADC8" />
-                <TextBlock Text="• Sets define named combinations" FontSize="11" Foreground="#A6ADC8" />
-                <TextBlock Text="• Evict costs control unload priority" FontSize="11" Foreground="#A6ADC8" />
-              </StackPanel>
-            </Border>
           </StackPanel>
         </ScrollViewer>
         </Grid>
 
-        </Panel>
+        </Grid>
         <Panel IsVisible="{Binding CurrentView, Converter={x:Static conv:StringEqualsConverter.Instance}, ConverterParameter=updates}">
-
-        <Grid RowDefinitions="Auto,*">
-          <Border Grid.Row="0" Padding="24,18" BorderBrush="#1F1F2E" BorderThickness="0,0,0,1" Background="#12121A">
-            <StackPanel Spacing="4">
-              <TextBlock Text="Updates" FontSize="20" FontWeight="SemiBold" Foreground="#CDD6F4"/>
-              <TextBlock Text="LlamaDeck, llama-swap, and llama.cpp releases." FontSize="12" Foreground="#6C7086" TextWrapping="Wrap"/>
-            </StackPanel>
-          </Border>
-          <ScrollViewer Grid.Row="1" Padding="24,16,24,32" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-          <StackPanel Spacing="16" DataContext="{Binding UpdateViewModel}">
-            <!-- LlamaDeck self-update -->
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <StackPanel Spacing="6">
-                <TextBlock Text="LlamaDeck Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
-                <TextBlock Text="Update LlamaDeck from the latest stable GitHub release tag." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
-
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Grid.Column="0" Spacing="6">
-                  <Grid ColumnDefinitions="140,*,140,*" ColumnSpacing="12">
-                    <TextBlock Grid.Column="0" Text="Current" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding LlamaDeckCurrentVersion}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                    <TextBlock Grid.Column="2" Text="Latest" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="3" Text="{Binding LlamaDeckLatestVersion}" FontSize="14" FontWeight="Bold" Foreground="#89B4FA" />
-                  </Grid>
-                  <TextBlock Text="{Binding LlamaDeckStatusText}" FontSize="12" Foreground="{Binding LlamaDeckStatusColor}" TextWrapping="Wrap" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Content="Check"
-                          Command="{Binding LlamaDeckCheckCommand}"
-                          Padding="14,7"
-                          IsEnabled="{Binding LlamaDeckCheckButtonEnabled}" />
-                  <Button Content="Update"
-                          Command="{Binding LlamaDeckUpdateCommand}"
-                          Classes="success"
-                          Padding="14,7"
-                          IsEnabled="{Binding LlamaDeckUpdateButtonEnabled}" />
-                </StackPanel>
-              </Grid>
-            </Border>
-
-            <!-- Shared update progress -->
-            <Border Padding="16" Background="#161622" CornerRadius="8" IsVisible="{Binding IsUpdating}">
-              <StackPanel Spacing="10">
-                <TextBlock Text="Installation Progress" FontSize="13" FontWeight="Bold" Foreground="#B4BEFE" />
-                <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="8" />
-                <TextBlock Text="{Binding ProgressText}" FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
-
-            <!-- llama-swap Header -->
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <StackPanel Spacing="6">
-                <TextBlock Text="llama-swap Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
-                <TextBlock Text="Download and install the latest llama-swap release from GitHub." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
-
-            <!-- Version info -->
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Grid.Column="0" Spacing="6">
-                  <Grid ColumnDefinitions="140,*,140,*" ColumnSpacing="12">
-                    <TextBlock Grid.Column="0" Text="Current" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding CurrentVersion}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                    <TextBlock Grid.Column="2" Text="Latest" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="3" Text="{Binding LatestVersion}" FontSize="14" FontWeight="Bold" Foreground="#89B4FA" />
-                  </Grid>
-                  <TextBlock Text="{Binding UpdateStatusText}" FontSize="12" Foreground="{Binding UpdateStatusColor}" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Content="Check"
-                          Command="{Binding CheckCommand}"
-                          Padding="14,7"
-                          IsEnabled="{Binding CheckButtonEnabled}" />
-                  <Button Content="Update"
-                          Command="{Binding UpdateCommand}"
-                          Classes="success"
-                          Padding="14,7"
-                          IsEnabled="{Binding UpdateButtonEnabled}" />
-                </StackPanel>
-              </Grid>
-            </Border>
-
-            <!-- Install info -->
-            <Border Padding="16" Background="#161622" CornerRadius="8" BorderBrush="#313244" BorderThickness="1">
+          <Grid RowDefinitions="Auto,*">
+            <Border Grid.Row="0"
+                    Padding="28,20"
+                    BorderBrush="#1F1F2E"
+                    BorderThickness="0,0,0,1"
+                    Background="#12121A">
               <StackPanel Spacing="4">
-                <TextBlock Text="Install Directory" FontSize="12" FontWeight="Bold" Foreground="#A6ADC8" />
-                <TextBlock Text="{Binding InstallDirectory}" FontSize="11" Foreground="#6C7086" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                <TextBlock Text="Updates"
+                           FontSize="24"
+                           FontWeight="SemiBold"
+                           Foreground="#CDD6F4"/>
+                <TextBlock Text="Manage LlamaDeck and supported runtime updates."
+                           FontSize="13"
+                           Foreground="#7F849C"
+                           TextWrapping="Wrap"/>
               </StackPanel>
             </Border>
 
-            <!-- llama.cpp Update -->
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <StackPanel Spacing="6">
-                <TextBlock Text="llama.cpp Update" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" />
-                <TextBlock Text="Download and install the latest llama.cpp release from GitHub. CUDA version is set in Settings." FontSize="12" Foreground="#A6ADC8" TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
+            <ScrollViewer Grid.Row="1"
+                          Padding="28,20,28,36"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch">
+              <StackPanel Spacing="14"
+                          MaxWidth="1080"
+                          HorizontalAlignment="Stretch"
+                          DataContext="{Binding UpdateViewModel}">
 
-            <Border Padding="16" Background="#161622" CornerRadius="8">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Grid.Column="0" Spacing="6">
-                  <Grid ColumnDefinitions="140,*,140,*" ColumnSpacing="12">
-                    <TextBlock Grid.Column="0" Text="Current" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding LlamaCppCurrentVersion}" FontSize="14" FontWeight="Bold" Foreground="#CDD6F4" />
-                    <TextBlock Grid.Column="2" Text="Latest" FontSize="12" Foreground="#6C7086" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="3" Text="{Binding LlamaCppLatestVersion}" FontSize="14" FontWeight="Bold" Foreground="#89B4FA" />
+                <!-- LlamaDeck hero update card -->
+                <Border Padding="20"
+                        Background="#151521"
+                        BorderBrush="#7658C7"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                  <Grid RowDefinitions="Auto,Auto" RowSpacing="16">
+                    <Grid Grid.Row="0"
+                          ColumnDefinitions="100,*,260"
+                          ColumnSpacing="20">
+                      <Border Grid.Column="0"
+                              Width="92"
+                              Height="92"
+                              CornerRadius="18"
+                              Background="#25203A"
+                              BorderBrush="#4A3C73"
+                              BorderThickness="1"
+                              VerticalAlignment="Top">
+                        <Image Source="avares://LlamaSwapManager.Desktop/Assets/llama.png"
+                               Width="64"
+                               Height="64"
+                               Stretch="Uniform"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"/>
+                      </Border>
+
+                      <StackPanel Grid.Column="1" Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                          <TextBlock Text="LlamaDeck Update"
+                                     FontSize="18"
+                                     FontWeight="Bold"
+                                     Foreground="#CDD6F4"
+                                     VerticalAlignment="Center"/>
+                          <Border Padding="10,4"
+                                  CornerRadius="12"
+                                  Background="#252038"
+                                  BorderBrush="#3A3155"
+                                  BorderThickness="1"
+                                  VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <Ellipse Width="7" Height="7"
+                                       Fill="{Binding LlamaDeckStatusColor}"
+                                       VerticalAlignment="Center"/>
+                              <TextBlock Text="{Binding LlamaDeckStatusText}"
+                                         FontSize="11"
+                                         Foreground="{Binding LlamaDeckStatusColor}"
+                                         VerticalAlignment="Center"/>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+
+                        <TextBlock Text="Keep LlamaDeck current with the latest stable features, fixes, and improvements."
+                                   FontSize="12"
+                                   Foreground="#A6ADC8"
+                                   TextWrapping="Wrap"
+                                   MaxWidth="540"/>
+
+                        <Grid ColumnDefinitions="Auto,52,Auto" ColumnSpacing="12">
+                          <StackPanel Grid.Column="0" Spacing="3">
+                            <TextBlock Text="Current"
+                                       FontSize="11"
+                                       FontWeight="Bold"
+                                       Foreground="#6C7086"/>
+                            <TextBlock Text="{Binding LlamaDeckCurrentVersion}"
+                                       FontSize="22"
+                                       FontWeight="Bold"
+                                       Foreground="#CDD6F4"/>
+                          </StackPanel>
+                          <TextBlock Grid.Column="1"
+                                     Text="→"
+                                     FontSize="24"
+                                     Foreground="#7F849C"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Bottom"
+                                     Margin="0,0,0,2"/>
+                          <StackPanel Grid.Column="2" Spacing="3">
+                            <TextBlock Text="Latest"
+                                       FontSize="11"
+                                       FontWeight="Bold"
+                                       Foreground="#6C7086"/>
+                            <TextBlock Text="{Binding LlamaDeckLatestVersion}"
+                                       FontSize="22"
+                                       FontWeight="Bold"
+                                       Foreground="#CBA6F7"/>
+                          </StackPanel>
+                        </Grid>
+
+                        <Button Command="{Binding OpenLlamaDeckReleaseCommand}"
+                                Padding="0"
+                                HorizontalAlignment="Left"
+                                Background="Transparent"
+                                BorderThickness="0">
+                          <TextBlock Text="View release notes on GitHub  ↗"
+                                     FontSize="12"
+                                     Foreground="#89B4FA"/>
+                        </Button>
+                      </StackPanel>
+
+                      <Border Grid.Column="2"
+                              Padding="20,2,0,2"
+                              BorderBrush="#2C2C40"
+                              BorderThickness="1,0,0,0">
+                        <StackPanel Spacing="10" VerticalAlignment="Center">
+                          <Button Command="{Binding LlamaDeckUpdateCommand}"
+                                  Classes="success"
+                                  Padding="18,11"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Center"
+                                  IsEnabled="{Binding LlamaDeckUpdateButtonEnabled}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                                <Grid Width="24" Height="24">
+                                  <Path Data="M12,3 L12,15 M7,10 L12,15 L17,10"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                  <Path Data="M5,20 L19,20 L19,17 M5,20 L5,17"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                </Grid>
+                              </Viewbox>
+                              <TextBlock Text="Update now" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                          </Button>
+                          <Button Command="{Binding LlamaDeckCheckCommand}"
+                                  Padding="18,10"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Center"
+                                  IsEnabled="{Binding LlamaDeckCheckButtonEnabled}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                                <Grid Width="24" Height="24">
+                                  <Path Data="M19,8 A8,8 0 1 0 20,14"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        Fill="Transparent"/>
+                                  <Path Data="M19,3 L19,8 L14,8"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                </Grid>
+                              </Viewbox>
+                              <TextBlock Text="Check again" VerticalAlignment="Center"/>
+                            </StackPanel>
+                          </Button>
+                          <StackPanel Orientation="Horizontal" Spacing="8" Margin="4,8,0,0">
+                            <TextBlock Text="ⓘ" FontSize="15" Foreground="#7F849C" VerticalAlignment="Top"/>
+                            <TextBlock Text="LlamaDeck restarts automatically after an app update."
+                                       FontSize="11"
+                                       Foreground="#7F849C"
+                                       TextWrapping="Wrap"
+                                       MaxWidth="190"/>
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            Padding="14"
+                            Background="#11111B"
+                            BorderBrush="#2C2C40"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            IsVisible="{Binding IsUpdating}">
+                      <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Grid.Column="0"
+                                     Text="{Binding ProgressText}"
+                                     FontSize="12"
+                                     Foreground="#BAC2DE"
+                                     TextWrapping="Wrap"/>
+                          <TextBlock Grid.Column="1"
+                                     Text="{Binding ProgressPercentage, StringFormat='{}{0}%'}"
+                                     FontSize="11"
+                                     FontWeight="Bold"
+                                     Foreground="#CBA6F7"/>
+                        </Grid>
+                        <ProgressBar Value="{Binding ProgressPercentage}"
+                                     Maximum="100"
+                                     Height="7"/>
+                      </StackPanel>
+                    </Border>
                   </Grid>
-                  <TextBlock Text="{Binding LlamaCppStatusText}" FontSize="12" Foreground="{Binding LlamaCppStatusColor}" />
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Content="Check"
-                          Command="{Binding LlamaCppCheckCommand}"
-                          Padding="14,7"
-                          IsEnabled="{Binding LlamaCppCheckButtonEnabled}" />
-                  <Button Content="Update"
-                          Command="{Binding LlamaCppUpdateCommand}"
-                          Classes="success"
-                          Padding="14,7"
-                          IsEnabled="{Binding LlamaCppUpdateButtonEnabled}" />
-                </StackPanel>
-              </Grid>
-            </Border>
+                </Border>
 
-            <!-- llama.cpp install info -->
-            <Border Padding="16" Background="#161622" CornerRadius="8" BorderBrush="#313244" BorderThickness="1">
-              <StackPanel Spacing="4">
-                <TextBlock Text="llama.cpp Directory" FontSize="12" FontWeight="Bold" Foreground="#A6ADC8" />
-                <TextBlock Text="{Binding LlamaCppDirectory}" FontSize="11" Foreground="#6C7086" FontFamily="Consolas, monospace" TextWrapping="Wrap" />
+                <!-- llama.cpp compact update card -->
+                <Border Padding="16"
+                        Background="#141420"
+                        BorderBrush="#29293B"
+                        BorderThickness="1"
+                        CornerRadius="11">
+                  <Grid ColumnDefinitions="78,*,220" ColumnSpacing="16">
+                    <Border Grid.Column="0"
+                            Width="64"
+                            Height="64"
+                            Background="#181824"
+                            BorderBrush="#343449"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            VerticalAlignment="Center">
+                      <TextBlock Text="C++"
+                                 FontSize="20"
+                                 FontWeight="Bold"
+                                 Foreground="#89B4FA"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"/>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2">
+                          <TextBlock Text="llama.cpp"
+                                     FontSize="15"
+                                     FontWeight="Bold"
+                                     Foreground="#CDD6F4"/>
+                          <TextBlock Text="C/C++ inference runtime used by local models"
+                                     FontSize="11"
+                                     Foreground="#7F849C"/>
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Padding="9,4"
+                                Background="#1D2526"
+                                BorderBrush="#29483B"
+                                BorderThickness="1"
+                                CornerRadius="11"
+                                VerticalAlignment="Center">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="7" Height="7"
+                                     Fill="{Binding LlamaCppStatusColor}"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding LlamaCppStatusText}"
+                                       FontSize="11"
+                                       Foreground="{Binding LlamaCppStatusColor}"/>
+                          </StackPanel>
+                        </Border>
+                      </Grid>
+
+                      <StackPanel Orientation="Horizontal" Spacing="18">
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="CURRENT" FontSize="9" FontWeight="Bold" Foreground="#585B70"/>
+                          <TextBlock Text="{Binding LlamaCppCurrentVersion}" FontSize="13" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        </StackPanel>
+                        <Border Width="1" Background="#2C2C40"/>
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="LATEST" FontSize="9" FontWeight="Bold" Foreground="#585B70"/>
+                          <TextBlock Text="{Binding LlamaCppLatestVersion}" FontSize="13" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        </StackPanel>
+                        <Button Command="{Binding OpenLlamaCppRepositoryCommand}"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                VerticalAlignment="Bottom">
+                          <TextBlock Text="Open on GitHub  ↗" FontSize="11" Foreground="#89B4FA"/>
+                        </Button>
+                      </StackPanel>
+
+                      <TextBlock Text="{Binding LlamaCppDirectory}"
+                                 FontSize="9"
+                                 Foreground="#45475A"
+                                 FontFamily="Consolas, monospace"
+                                 TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <Border Grid.Column="2"
+                            Padding="18,0,0,0"
+                            BorderBrush="#2C2C40"
+                            BorderThickness="1,0,0,0">
+                      <StackPanel Spacing="8" VerticalAlignment="Center">
+                        <Button Command="{Binding LlamaCppCheckCommand}"
+                                Padding="14,8"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                IsEnabled="{Binding LlamaCppCheckButtonEnabled}">
+                          <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                                <Grid Width="24" Height="24">
+                                  <Path Data="M19,8 A8,8 0 1 0 20,14"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        Fill="Transparent"/>
+                                  <Path Data="M19,3 L19,8 L14,8"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                </Grid>
+                              </Viewbox>
+                            <TextBlock Text="Check"/>
+                          </StackPanel>
+                        </Button>
+                        <Button Command="{Binding LlamaCppUpdateCommand}"
+                                Classes="success"
+                                Padding="14,8"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                IsEnabled="{Binding LlamaCppUpdateButtonEnabled}">
+                          <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                                <Grid Width="24" Height="24">
+                                  <Path Data="M12,3 L12,15 M7,10 L12,15 L17,10"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                  <Path Data="M5,20 L19,20 L19,17 M5,20 L5,17"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                </Grid>
+                              </Viewbox>
+                            <TextBlock Text="Update"/>
+                          </StackPanel>
+                        </Button>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+                </Border>
+
+                <!-- llama-swap compact update card -->
+                <Border Padding="16"
+                        Background="#141420"
+                        BorderBrush="#29293B"
+                        BorderThickness="1"
+                        CornerRadius="11">
+                  <Grid ColumnDefinitions="78,*,220" ColumnSpacing="16">
+                    <Border Grid.Column="0"
+                            Width="64"
+                            Height="64"
+                            Background="#181824"
+                            BorderBrush="#343449"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            VerticalAlignment="Center">
+                      <TextBlock Text="⇄"
+                                 FontSize="31"
+                                 FontWeight="Bold"
+                                 Foreground="#89B4FA"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"/>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2">
+                          <TextBlock Text="llama-swap"
+                                     FontSize="15"
+                                     FontWeight="Bold"
+                                     Foreground="#CDD6F4"/>
+                          <TextBlock Text="Model routing and runtime orchestration"
+                                     FontSize="11"
+                                     Foreground="#7F849C"/>
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Padding="9,4"
+                                Background="#252038"
+                                BorderBrush="#3A3155"
+                                BorderThickness="1"
+                                CornerRadius="11"
+                                VerticalAlignment="Center">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="7" Height="7"
+                                     Fill="{Binding UpdateStatusColor}"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding UpdateStatusText}"
+                                       FontSize="11"
+                                       Foreground="{Binding UpdateStatusColor}"/>
+                          </StackPanel>
+                        </Border>
+                      </Grid>
+
+                      <StackPanel Orientation="Horizontal" Spacing="18">
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="CURRENT" FontSize="9" FontWeight="Bold" Foreground="#585B70"/>
+                          <TextBlock Text="{Binding CurrentVersion}" FontSize="13" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        </StackPanel>
+                        <Border Width="1" Background="#2C2C40"/>
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="LATEST" FontSize="9" FontWeight="Bold" Foreground="#585B70"/>
+                          <TextBlock Text="{Binding LatestVersion}" FontSize="13" FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                        </StackPanel>
+                        <Button Command="{Binding OpenLlamaSwapRepositoryCommand}"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                VerticalAlignment="Bottom">
+                          <TextBlock Text="Open on GitHub  ↗" FontSize="11" Foreground="#89B4FA"/>
+                        </Button>
+                      </StackPanel>
+
+                      <TextBlock Text="{Binding InstallDirectory}"
+                                 FontSize="9"
+                                 Foreground="#45475A"
+                                 FontFamily="Consolas, monospace"
+                                 TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <Border Grid.Column="2"
+                            Padding="18,0,0,0"
+                            BorderBrush="#2C2C40"
+                            BorderThickness="1,0,0,0">
+                      <StackPanel Spacing="8" VerticalAlignment="Center">
+                        <Button Command="{Binding CheckCommand}"
+                                Padding="14,8"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                IsEnabled="{Binding CheckButtonEnabled}">
+                          <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                                <Grid Width="24" Height="24">
+                                  <Path Data="M19,8 A8,8 0 1 0 20,14"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        Fill="Transparent"/>
+                                  <Path Data="M19,3 L19,8 L14,8"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                </Grid>
+                              </Viewbox>
+                            <TextBlock Text="Check"/>
+                          </StackPanel>
+                        </Button>
+                        <Button Command="{Binding UpdateCommand}"
+                                Classes="success"
+                                Padding="14,8"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                IsEnabled="{Binding UpdateButtonEnabled}">
+                          <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center">
+                                <Grid Width="24" Height="24">
+                                  <Path Data="M12,3 L12,15 M7,10 L12,15 L17,10"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                  <Path Data="M5,20 L19,20 L19,17 M5,20 L5,17"
+                                        Stroke="#CDD6F4"
+                                        StrokeThickness="1.8"
+                                        StrokeLineCap="Round"
+                                        StrokeJoin="Round"/>
+                                </Grid>
+                              </Viewbox>
+                            <TextBlock Text="Update"/>
+                          </StackPanel>
+                        </Button>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+                </Border>
+
               </StackPanel>
-            </Border>
-          </StackPanel>
-        </ScrollViewer>
-        </Grid>
-
+            </ScrollViewer>
+          </Grid>
         </Panel>
-      </Panel>
+      </Grid>
     </Border>
   
     

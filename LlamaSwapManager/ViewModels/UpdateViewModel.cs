@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -68,6 +69,9 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
     public ICommand LlamaDeckCheckCommand { get; }
     public ICommand LlamaDeckUpdateCommand { get; }
+    public ICommand OpenLlamaDeckReleaseCommand { get; }
+    public ICommand OpenLlamaSwapRepositoryCommand { get; }
+    public ICommand OpenLlamaCppRepositoryCommand { get; }
     public ICommand CheckCommand { get; }
     public ICommand UpdateCommand { get; }
     public ICommand LlamaCppCheckCommand { get; }
@@ -95,6 +99,11 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
 
         LlamaDeckCheckCommand = new AsyncRelayCommand(CheckLlamaDeckUpdatesInternalAsync);
         LlamaDeckUpdateCommand = new AsyncRelayCommand(ExecuteLlamaDeckUpdateAsync);
+        OpenLlamaDeckReleaseCommand = new RelayCommand(OpenLlamaDeckRelease);
+        OpenLlamaSwapRepositoryCommand = new RelayCommand(
+            () => OpenUrl("https://github.com/mostlygeek/llama-swap"));
+        OpenLlamaCppRepositoryCommand = new RelayCommand(
+            () => OpenUrl("https://github.com/ggml-org/llama.cpp"));
         CheckCommand = new AsyncRelayCommand(CheckForUpdatesInternalAsync);
         UpdateCommand = new AsyncRelayCommand(ExecuteUpdateAsync);
         LlamaCppCheckCommand = new AsyncRelayCommand(CheckLlamaCppUpdatesInternalAsync);
@@ -104,6 +113,26 @@ public partial class UpdateViewModel : ObservableObject, IDisposable
         _ = CheckLlamaDeckUpdatesInternalAsync();
         _ = CheckForUpdatesInternalAsync();
         _ = CheckLlamaCppUpdatesInternalAsync();
+    }
+
+    private void OpenLlamaDeckRelease()
+    {
+        var url = _llamaDeckUpdate?.ReleaseUrl;
+        OpenUrl(string.IsNullOrWhiteSpace(url)
+            ? "https://github.com/brunocasado/LlamaDeck/releases/latest"
+            : url);
+    }
+
+    private void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            OnLogMessage($"Could not open URL: {ex.Message}");
+        }
     }
 
     private async Task CheckLlamaDeckUpdatesInternalAsync()
