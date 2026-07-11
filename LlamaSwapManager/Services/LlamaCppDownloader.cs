@@ -1,1220 +1,187 @@
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Security;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace LlamaSwapManager.Services;
 
 /// <summary>
-/// Downloads and installs llama.cpp binaries from GitHub releases.
-/// Handles platform detection, checksum verification, extraction, backup, and rollback.
+/// Coordinates release discovery, artifact download, installation, CUDA runtime setup,
+/// and local version detection for llama.cpp.
 /// </summary>
-public class LlamaCppDownloader : IDisposable
+public sealed class LlamaCppDownloader : IDisposable
 {
     private readonly HttpClient _http;
-    private readonly string _userDirectory;
-    private readonly string _downloadsDir;
-    private const string GithubApiBase = "https://api.github.com/repos/ggml-org/llama.cpp";
+    private readonly string _downloadsDirectory;
+    private readonly LlamaCppVersionDetector _versionDetector;
+    private readonly GitHubReleaseClient _releaseClient;
+    private readonly LlamaCppAssetSelector _assetSelector;
+    private readonly LlamaCppArtifactDownloader _artifactDownloader;
+    private readonly LlamaCppInstaller _installer;
+    private readonly CudaRuntimeInstaller _cudaRuntimeInstaller;
 
     public event Action<string>? LogMessage;
 
     public LlamaCppDownloader(string? userDirectory = null)
     {
-        _userDirectory = userDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama-swap");
-        _downloadsDir = Path.Combine(_userDirectory, ".updates");
-        _http = CreateSecureHttpClient();
-        _http.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaSwapManager");
+        var rootDirectory = userDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".llama-swap");
+        _downloadsDirectory = Path.Combine(rootDirectory, ".updates");
+
+        _http = CreateHttpClient();
+        var processManager = new LlamaCppProcessManager(Log);
+        var platformConfigurator = new LlamaCppPlatformConfigurator(Log);
+        _versionDetector = new LlamaCppVersionDetector(platformConfigurator, Log);
+        _releaseClient = new GitHubReleaseClient(_http, Log);
+        _assetSelector = new LlamaCppAssetSelector(Log);
+        _artifactDownloader = new LlamaCppArtifactDownloader(_http, Log);
+        _installer = new LlamaCppInstaller(
+            _downloadsDirectory,
+            processManager,
+            platformConfigurator,
+            Log);
+        _cudaRuntimeInstaller = new CudaRuntimeInstaller(
+            _downloadsDirectory,
+            _artifactDownloader,
+            _installer,
+            platformConfigurator,
+            Log);
     }
 
-    /// <summary>
-    /// Creates an HttpClient with explicit SSL certificate validation (H2 fix).
-    /// Also supports GITHUB_TOKEN for authenticated API calls (M2).
-    /// </summary>
-    private static HttpClient CreateSecureHttpClient()
-    {
-        var handler = new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
-            {
-                if (errors != SslPolicyErrors.None)
-                    return false;
-                return true;
-            }
-        };
-
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
-
-        // M2: Support GITHUB_TOKEN env var
-        var githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-        if (!string.IsNullOrEmpty(githubToken))
-        {
-            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", githubToken);
-        }
-
-        return client;
-    }
-
-    /// <summary>
-    /// Download and install the latest llama.cpp release to the given directory.
-    /// </summary>
-    /// <param name="targetDirectory">Directory where llama.cpp binaries should be installed (e.g. ~/.llama/).</param>
-    /// <param name="progress">Progress reporter (0.0 to 1.0).</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <param name="preferredCudaVersion">Optional forced CUDA version (e.g. "12.4"). Null = auto-detect.</param>
-    /// <returns>True if install succeeded, false otherwise.</returns>
     public async Task<bool> DownloadAndInstallAsync(
         string targetDirectory,
         IProgress<double>? progress = null,
         CancellationToken ct = default,
         string? preferredCudaVersion = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
+
         progress?.Report(0.0);
-        LogMessage?.Invoke("[llama.cpp] Starting download of latest release...");
+        Log("[llama.cpp] Starting download of latest release...");
 
-        // Step 1: Get latest release info from GitHub API
         progress?.Report(0.05);
-        var release = await GetLatestReleaseAsync(ct);
-        if (release == null)
+        var release = await _releaseClient.GetLatestReleaseAsync(ct);
+        if (release is null)
         {
-            LogMessage?.Invoke("[llama.cpp] Failed to fetch latest release info");
+            Log("[llama.cpp] Failed to fetch latest release info");
             return false;
         }
 
-        var tag = release?.GetProperty("tag_name").GetString() ?? "";
-        LogMessage?.Invoke($"[llama.cpp] Latest version: {tag}");
+        var tag = release.Value.GetProperty("tag_name").GetString() ?? string.Empty;
+        Log($"[llama.cpp] Latest version: {tag}");
 
-        // Step 2: Detect the right asset for current platform (includes CUDA version-aware selection)
         progress?.Report(0.15);
-        var assetInfo = DetectAssetForPlatform(tag, release, preferredCudaVersion);
-        if (assetInfo == null)
+        var asset = _assetSelector.DetectAssetForPlatform(tag, release, preferredCudaVersion);
+        if (asset is null)
         {
-            LogMessage?.Invoke("[llama.cpp] No suitable asset found for this platform");
+            Log("[llama.cpp] No suitable asset found for this platform");
             return false;
         }
 
-        LogMessage?.Invoke($"[llama.cpp] Selected asset: {assetInfo.Name} ({FormatSize(assetInfo.Size)})");
+        Log($"[llama.cpp] Selected asset: {asset.Name} ({FormatSize(asset.Size)})");
 
-        // Step 3: Create temp download directory
-        var tempDir = CreateTempDirectory(tag);
-        var archivePath = Path.Combine(tempDir, assetInfo.Name);
-
-        // Step 4: Download the archive
-        progress?.Report(0.20);
-        var downloadOk = await DownloadAssetAsync(assetInfo.Url, archivePath, progress, ct);
-        if (!downloadOk || ct.IsCancellationRequested)
+        var tempDirectory = CreateTempDirectory(tag);
+        try
         {
-            LogMessage?.Invoke("[llama.cpp] Download failed or cancelled");
-            DeleteDirectory(tempDir);
-            return false;
-        }
+            var archivePath = Path.Combine(tempDirectory, asset.Name);
 
-        // Step 5: Verify SHA-256 checksum
-        progress?.Report(0.70);
-        var checksumOk = await VerifyChecksumAsync(archivePath, assetInfo.Digest, ct);
-        if (!checksumOk)
+            progress?.Report(0.20);
+            if (!await _artifactDownloader.DownloadAsync(asset.Url, archivePath, progress, ct))
+            {
+                Log("[llama.cpp] Download failed or cancelled");
+                return false;
+            }
+
+            progress?.Report(0.70);
+            if (!await _artifactDownloader.VerifyChecksumAsync(archivePath, asset.Digest, ct))
+            {
+                Log("[llama.cpp] Checksum verification failed — aborting");
+                return false;
+            }
+
+            Log("[llama.cpp] Checksum verified OK");
+
+            progress?.Report(0.80);
+            var installed = await _installer.InstallAsync(
+                tempDirectory,
+                archivePath,
+                targetDirectory,
+                ct);
+
+            if (installed &&
+                GpuDetectionSettings.GetEffectiveBackend() == GpuDetectionService.GpuBackend.Cuda &&
+                asset.CudartAssets.Count > 0)
+            {
+                progress?.Report(0.90);
+                await _cudaRuntimeInstaller.InstallAsync(
+                    asset.CudartAssets.FirstOrDefault(),
+                    targetDirectory,
+                    ct);
+            }
+
+            Log(installed
+                ? $"[llama.cpp] Install complete — version {tag} in {targetDirectory}"
+                : "[llama.cpp] Install failed — check logs for details");
+
+            progress?.Report(1.0);
+            return installed;
+        }
+        finally
         {
-            LogMessage?.Invoke("[llama.cpp] Checksum verification failed — aborting");
-            DeleteDirectory(tempDir);
-            return false;
+            LlamaCppInstaller.DeleteDirectory(tempDirectory);
         }
-
-        LogMessage?.Invoke("[llama.cpp] Checksum verified OK");
-
-        // Step 6: Extract and install with backup/rollback
-        progress?.Report(0.80);
-        var installOk = await ExtractAndInstallAsync(tempDir, archivePath, targetDirectory, ct);
-
-        // Clean up temp directory
-        DeleteDirectory(tempDir);
-
-        // Step 7: Download CUDA runtime libraries (non-critical, only for CUDA backend)
-        if (installOk && IsCudaBackend() && assetInfo.CudartAssets.Any())
-        {
-            progress?.Report(0.90);
-            await DownloadCudaRuntimeAsync(assetInfo.CudartAssets.FirstOrDefault(), targetDirectory, ct);
-        }
-
-        if (installOk)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Install complete — version {tag} in {targetDirectory}");
-        }
-        else
-        {
-            LogMessage?.Invoke("[llama.cpp] Install failed — check logs for details");
-        }
-
-        progress?.Report(1.0);
-        return installOk;
     }
 
-    /// <summary>
-    /// Check if an update is available by comparing the local version against the latest remote version.
-    /// </summary>
-      public async Task<(bool HasUpdate, string? RemoteVersion, string? LocalVersion)> CheckForUpdateAsync(
+    public async Task<(bool HasUpdate, string? RemoteVersion, string? LocalVersion)> CheckForUpdateAsync(
         string targetDirectory,
         CancellationToken ct = default)
     {
-        LogMessage?.Invoke($"[llama.cpp] CheckForUpdateAsync called with targetDirectory: {targetDirectory}");
-         var release = await GetLatestReleaseAsync(ct);
-        var remoteTag = release?.GetProperty("tag_name").GetString();
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
+        Log($"[llama.cpp] CheckForUpdateAsync called with targetDirectory: {targetDirectory}");
 
-        // Use GitHub tag as-is (it's already in the correct format, e.g. "b9660")
-        string? remoteVersion = remoteTag?.Trim();
-
-        var localVersion = DetectLocalVersion(targetDirectory);
+        var release = await _releaseClient.GetLatestReleaseAsync(ct);
+        var remoteVersion = release?.GetProperty("tag_name").GetString()?.Trim();
+        var localVersion = await _versionDetector.DetectAsync(targetDirectory, ct);
 
         return (
-            HasUpdate: remoteVersion != null && !string.Equals(remoteVersion, localVersion, StringComparison.Ordinal),
+            HasUpdate: remoteVersion is not null &&
+                       !string.Equals(remoteVersion, localVersion, StringComparison.Ordinal),
             RemoteVersion: remoteVersion,
-            LocalVersion: localVersion
-        );
+            LocalVersion: localVersion);
     }
 
-    // ---- GitHub API ----
+    public void Dispose() => _http.Dispose();
 
-    private async Task<JsonElement?> GetLatestReleaseAsync(CancellationToken ct)
-    {
-        try
-        {
-            using var response = await _http.GetAsync($"{GithubApiBase}/releases/latest", ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                LogMessage?.Invoke($"[llama.cpp] GitHub API error: {(int)response.StatusCode} {response.StatusCode}");
-                return null;
-            }
-
-            var json = await response.Content.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(json);
-            // Clone the root element so it survives after the JsonDocument is disposed.
-            // doc.RootElement is a struct referencing internal memory — it becomes invalid
-            // once the using block exits.
-            var clone = doc.RootElement.Clone();
-            return clone;
-        }
-        catch (HttpRequestException ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Network error fetching release: {ex.Message}");
-            return null;
-        }
-        catch (TaskCanceledException)
-        {
-            LogMessage?.Invoke("[llama.cpp] Request timed out");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Error fetching release: {ex.Message}");
-            return null;
-        }
-    }
-
-    // ---- Asset Detection ----
-
-    private DetectedAsset? DetectAssetForPlatform(
-        string tag, JsonElement? release, string? preferredCudaVersion = null)
-    {
-        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        var isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
-        var isMacArm = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
-                       RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-        var isMacIntel = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
-                         RuntimeInformation.ProcessArchitecture == Architecture.X64;
-
-        var platformName = isWindows ? "Windows" : isLinux ? "Linux" : "macOS";
-        LogMessage?.Invoke($"[llama.cpp] Platform: {platformName}, Arch: {RuntimeInformation.ProcessArchitecture}, Tag: {tag}");
-
-        var patterns = new List<string?>();
-
-        if (isMacArm)
-        {
-            // Asset names: llama-b9704-bin-macos-arm64.tar.gz (no trailing dash after arm64)
-            patterns.Add("-macos-arm64");
-        }
-        else if (isMacIntel)
-        {
-            // Asset names: llama-b9704-bin-macos-x64.tar.gz (no trailing dash after x64)
-            patterns.Add("-macos-x64");
-        }
-        else if (isWindows || isLinux)
-        {
-            // Windows/Linux: use user preference or auto-detect
-            var effectiveBackend = GpuDetectionSettings.GetEffectiveBackend();
-            LogMessage?.Invoke($"[llama.cpp] GPU backend setting: {effectiveBackend}");
-
-            var detectedBackends = GpuDetectionService.DetectBackends();
-            var detectedNames = string.Join(", ", detectedBackends.Select(d => $"{d.Backend}({d.Priority})"));
-            LogMessage?.Invoke($"[llama.cpp] Detected backends: {detectedNames}");
-
-            var userPattern = GpuDetectionService.GetPreferredAssetPattern(effectiveBackend);
-            if (userPattern != null)
-            {
-                patterns.Add(userPattern);
-                LogMessage?.Invoke($"[llama.cpp] User preference pattern: {userPattern}");
-            }
-
-            // Fall back to auto-detected backends in priority order
-            foreach (var gpu in detectedBackends)
-            {
-                if (gpu.Backend == effectiveBackend) continue;
-                var pattern = GpuDetectionService.GetPreferredAssetPattern(gpu.Backend);
-                if (pattern != null && !patterns.Contains(pattern))
-                {
-                    patterns.Add(pattern);
-                    LogMessage?.Invoke($"[llama.cpp] Auto-detected pattern: {pattern}");
-                }
-            }
-        }
-
-        if (release == null)
-        {
-            LogMessage?.Invoke("[llama.cpp] No release info found");
-            return null;
-        }
-
-        if (!release.Value.TryGetProperty("assets", out var assets))
-        {
-            LogMessage?.Invoke("[llama.cpp] No assets property found in release");
-            return null;
-        }
-
-        var assetArray = assets.EnumerateArray().ToList();
-        if (!assetArray.Any())
-        {
-            LogMessage?.Invoke("[llama.cpp] No assets found in release");
-            return null;
-        }
-
-        // Parse CUDA assets for version-aware selection
-        var allCudaAssets = ParseCudaAssets(release.Value);
-        var cudartAssets = allCudaAssets.Where(a => a.AssetType == CudaAssetType.Cudart).ToList();
-        var llamaCudaAssets = allCudaAssets.Where(a => a.AssetType == CudaAssetType.LlamaBuild).ToList();
-
-        if (llamaCudaAssets.Any())
-            LogMessage?.Invoke($"[llama.cpp] Found {llamaCudaAssets.Count} CUDA llama.cpp asset(s): {string.Join(", ", llamaCudaAssets.Select(a => a.Name))}");
-
-        // For CUDA backend on Windows/Linux, use version-aware asset selection
-        if (isWindows || isLinux)
-        {
-            var effectiveBackend = GpuDetectionSettings.GetEffectiveBackend();
-
-            if (effectiveBackend == GpuDetectionService.GpuBackend.Cuda)
-            {
-                // User-selected CUDA version (from UI picker) or empty string
-                // No auto-detection of system CUDA toolkit — llama.cpp bundles its own DLLs
-                var userVersion = string.IsNullOrWhiteSpace(preferredCudaVersion)
-                    ? null
-                    : preferredCudaVersion;
-
-                LogMessage?.Invoke($"[llama.cpp] CUDA version selected: {(userVersion ?? "auto (latest)")}");
-
-                if (userVersion != null)
-                {
-                    // User explicitly chose a version — find matching CUDA build
-                    var bestAsset = FindBestCudaAsset(llamaCudaAssets, userVersion);
-                    if (bestAsset != null)
-                    {
-                        LogMessage?.Invoke($"[llama.cpp] Selected CUDA {userVersion} build: {bestAsset.Name}");
-                        return new DetectedAsset(
-                            bestAsset.Name,
-                            bestAsset.Size,
-                            bestAsset.Url,
-                            bestAsset.Digest,
-                            cudartAssets.Where(a => a.Name.Contains(userVersion)).ToList());
-                    }
-
-                    LogMessage?.Invoke($"[llama.cpp] No CUDA {userVersion} asset found, falling back to latest");
-                }
-
-                // Fallback: pick latest CUDA build (user didn't specify version)
-                var latestAsset = llamaCudaAssets.OrderByDescending(a => a.Name).FirstOrDefault();
-                if (latestAsset != null)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Selected latest CUDA build: {latestAsset.Name}");
-                    return new DetectedAsset(
-                        latestAsset.Name,
-                        latestAsset.Size,
-                        latestAsset.Url,
-                        latestAsset.Digest,
-                        cudartAssets);
-                }
-
-                LogMessage?.Invoke($"[llama.cpp] No CUDA assets available in release, falling back to non-CUDA");
-            }
-        }
-
-        // Non-CUDA path: use existing pattern-based detection
-        var arch = RuntimeInformation.ProcessArchitecture;
-        var archFilter = arch == Architecture.Arm64 ? "arm64" : "x64";
-        var archiveFormat = isWindows ? ".zip" : ".tar.gz";
-
-         // Filter patterns: if no GPU was detected (only CpuOnly), only use CPU fallback patterns.
-            // This prevents selecting CUDA/Vulkan assets when user has GPU preference but no hardware.
-            var nonCudaBackends = GpuDetectionService.DetectBackends();
-            var hasGpu = nonCudaBackends.Any(g => g.Backend != GpuDetectionService.GpuBackend.CpuOnly);
-            LogMessage?.Invoke($"[llama.cpp] Has GPU: {hasGpu}, Patterns: [{string.Join(", ", patterns.Where(p => p != null))}], Format: {archiveFormat}");
-
-        var filteredPatterns = patterns.Where(p =>
-        {
-            if (p == null) return false;
-            if (hasGpu) return true;
-            // No GPU detected — only allow CPU fallback patterns
-            return p.Contains("-cpu-");
-        }).ToList();
-
-        LogMessage?.Invoke($"[llama.cpp] Filtered patterns (GPU filter applied): [{string.Join(", ", filteredPatterns)}]");
-
-        // Try each pattern in priority order
-        foreach (var pattern in filteredPatterns)
-        {
-            if (pattern == null) continue;
-
-            var matches = assetArray
-                .Select(a => a.GetProperty("name").GetString() ?? "")
-                .Where(name => name.Contains(pattern) && name.EndsWith(archiveFormat) && name.Contains(archFilter))
-                .ToList();
-
-            if (matches.Any())
-            {
-                LogMessage?.Invoke($"[llama.cpp] Pattern '{pattern}' matched: {matches[0]}");
-                var asset = assetArray.First(a => (a.GetProperty("name").GetString() ?? "") == matches[0]);
-                return new DetectedAsset(
-                    matches[0], asset.GetProperty("size").GetInt64(),
-                    asset.GetProperty("browser_download_url").GetString() ?? "",
-                    asset.GetProperty("digest").GetString() ?? "",
-                    cudartAssets);
-            }
-            else
-            {
-                LogMessage?.Invoke($"[llama.cpp] Pattern '{pattern}' did not match any asset");
-            }
-        }
-
-        // Final fallback: list available assets for debugging
-        var availableAssets = assetArray.Select(a => a.GetProperty("name").GetString() ?? "").ToList();
-        LogMessage?.Invoke($"[llama.cpp] No pattern matched. Available {availableAssets.Count} assets: {string.Join(", ", availableAssets)}");
-
-        // Final fallback: any platform-appropriate tar.gz/zip
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            foreach (var asset in assetArray)
-            {
-                var name = asset.GetProperty("name").GetString() ?? "";
-                if (name.Contains("-macos-") && name.EndsWith(".tar.gz") && !name.Contains("xcframework"))
-                {
-                    return new DetectedAsset(
-                        name, asset.GetProperty("size").GetInt64(),
-                        asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "",
-                        cudartAssets);
-                }
-            }
-        }
-        else if (isWindows)
-        {
-            foreach (var asset in assetArray)
-            {
-                var name = asset.GetProperty("name").GetString() ?? "";
-                if (name.Contains("-win-cpu-") && name.EndsWith(".zip") && name.Contains(archFilter))
-                {
-                    return new DetectedAsset(
-                        name, asset.GetProperty("size").GetInt64(),
-                        asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "",
-                        cudartAssets);
-                }
-            }
-        }
-        else if (isLinux)
-        {
-            foreach (var asset in assetArray)
-            {
-                var name = asset.GetProperty("name").GetString() ?? "";
-                if (name.Contains("-ubuntu-x64-") && name.EndsWith(".tar.gz"))
-                {
-                    return new DetectedAsset(
-                        name, asset.GetProperty("size").GetInt64(),
-                        asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("digest").GetString() ?? "",
-                        cudartAssets);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Check if the current backend is CUDA-based.
-    /// </summary>
-    private static bool IsCudaBackend()
-    {
-        return GpuDetectionSettings.GetEffectiveBackend() == GpuDetectionService.GpuBackend.Cuda;
-    }
-
-    // ---- Download ----
-
-    private async Task<bool> DownloadAssetAsync(
-        string url, string destinationPath, IProgress<double>? progress, CancellationToken ct)
-    {
-        try
-        {
-            // Check disk space before downloading
-            var parentDir = Directory.GetParent(destinationPath);
-            if (parentDir != null && !HasEnoughDiskSpace(parentDir.FullName, 500 * 1024 * 1024))
-            {
-                LogMessage?.Invoke("[llama.cpp] Insufficient disk space (need 500MB free)");
-                return false;
-            }
-
-            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Download error: {(int)response.StatusCode} {response.StatusCode}");
-                return false;
-            }
-
-            var contentLength = response.Content.Headers.ContentLength;
-            var totalBytes = contentLength ?? 0;
-
-            using var stream = await response.Content.ReadAsStreamAsync(ct);
-            using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-
-            var buffer = new byte[81920];
-            var totalRead = 0L;
-            int bytesRead;
-
-            while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
-            {
-                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-
-                totalRead += bytesRead;
-
-                if (totalBytes > 0 && progress != null)
-                {
-                    var downloadProgress = 0.20 + (0.50 * (double)totalRead / totalBytes);
-                    progress.Report(Math.Min(downloadProgress, 0.70));
-                }
-            }
-
-            return true;
-        }
-        catch (TaskCanceledException)
-        {
-            LogMessage?.Invoke("[llama.cpp] Download cancelled or timed out");
-            return false;
-        }
-        catch (HttpRequestException ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Download network error: {ex.Message}");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Download error: {ex.Message}");
-            return false;
-        }
-    }
-
-    // ---- Checksum Verification ----
-
-    private async Task<bool> VerifyChecksumAsync(string filePath, string? expectedDigest, CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(expectedDigest) || !expectedDigest.StartsWith("sha256:"))
-        {
-            LogMessage?.Invoke("[llama.cpp] No checksum available — skipping verification (WARNING)");
-            // Don't fail on missing checksum — just warn
-            return true;
-        }
-
-        var expectedHash = expectedDigest.Substring("sha256:".Length).ToLowerInvariant();
-
-        try
-        {
-            using var sha256 = SHA256.Create();
-            using var stream = File.OpenRead(filePath);
-            var hashBytes = await sha256.ComputeHashAsync(stream, ct);
-            var actualHash = BitConverter.ToString(hashBytes).ToLowerInvariant().Replace("-", "");
-
-            if (actualHash != expectedHash)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Checksum mismatch: expected {expectedHash}, got {actualHash}");
-                return false;
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Checksum verification error: {ex.Message}");
-            return false;
-        }
-    }
-
-    // ---- Extract & Install with Backup/Rollback ----
-
-    private async Task<bool> ExtractAndInstallAsync(
-        string tempDir, string archivePath, string targetDirectory, CancellationToken ct)
-    {
-        // Ensure target directory exists
-        if (!Directory.Exists(targetDirectory))
-        {
-            try
-            {
-                Directory.CreateDirectory(targetDirectory);
-            }
-            catch (Exception ex)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Cannot create target directory: {ex.Message}");
-                return false;
-            }
-        }
-
-        // Backup existing files in target directory
-        var backupPath = Path.Combine(
-            _downloadsDir,
-            $"llama-cpp-backup-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}");
-
-        // Kill any running llama-server/llama-cpp processes before install
-        LogMessage?.Invoke("[llama.cpp] Stopping llama-server processes before update...");
-        await KillLlamaServerProcessesAsync(targetDirectory, ct);
-        await Task.Delay(1000, ct); // Give processes time to release file handles
-
-        try
-        {
-            LogMessage?.Invoke("[llama.cpp] Backing up existing llama.cpp files...");
-            CopyDirectory(targetDirectory, backupPath);
-
-            // Extract archive to a staging directory inside temp
-            var stagingDir = Path.Combine(tempDir, "staging");
-            Directory.CreateDirectory(stagingDir);
-
-            LogMessage?.Invoke("[llama.cpp] Extracting archive...");
-
-            if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                ArchiveExtractor.ExtractZip(archivePath, stagingDir, ct);
-            }
-            else if (archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
-                     archivePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
-            {
-                ArchiveExtractor.ExtractTarGz(archivePath, stagingDir, ct);
-            }
-            else
-            {
-                LogMessage?.Invoke("[llama.cpp] Unsupported archive format");
-                Rollback(backupPath, targetDirectory);
-                return false;
-            }
-
-            // Copy extracted files to target directory
-            LogMessage?.Invoke("[llama.cpp] Installing new files...");
-
-            // List extracted files for debugging
-            var stagingFiles = Directory.GetFiles(stagingDir, "*", SearchOption.AllDirectories)
-                .Select(f => f.Replace(stagingDir + Path.DirectorySeparatorChar, "")).ToList();
-            LogMessage?.Invoke($"[llama.cpp] Extracted {stagingFiles.Count} files: {string.Join(", ", stagingFiles)}");
-
-            CopyDirectoryContents(stagingDir, targetDirectory, ct);
-
-            // Make binaries executable on Unix
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                MakeBinariesExecutable(targetDirectory, ct);
-            }
-
-            // Verify key binary exists after install
-            var serverBin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? "llama-server.exe"
-                : "llama-server";
-            var expectedPath = Path.Combine(targetDirectory, serverBin);
-            var existsAfterInstall = File.Exists(expectedPath);
-            var targetFiles = Directory.GetFiles(targetDirectory, "*", SearchOption.TopDirectoryOnly)
-                .Select(f => Path.GetFileName(f)).ToList();
-            LogMessage?.Invoke($"[llama.cpp] Verify '{serverBin}': exists={existsAfterInstall}, target has {targetFiles.Count} files: {string.Join(", ", targetFiles)}");
-
-            if (!existsAfterInstall)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Installed binary '{serverBin}' not found at '{expectedPath}' — rollback");
-                Rollback(backupPath, targetDirectory);
-                return false;
-            }
-
-            // Remove macOS quarantine attribute
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                try
-                {
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = "/usr/bin/xattr",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    startInfo.ArgumentList.Add("-d");
-                    startInfo.ArgumentList.Add("com.apple.quarantine");
-                    startInfo.ArgumentList.Add(targetDirectory);
-
-                    using var process = Process.Start(startInfo);
-                    if (process is not null)
-                        await process.WaitForExitAsync(ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Quarantine removal warning: {ex.Message}");
-                }
-
-                // H1: Verify codesign on extracted binary
-                var codesignOk = VerifyCodesign(expectedPath);
-                if (!codesignOk)
-                {
-                    LogMessage?.Invoke("[llama.cpp] Warning: codesign verification failed — binary may not be signed by a known developer");
-                }
-            }
-
-            // Success — remove backup
-            DeleteDirectory(backupPath);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            LogMessage?.Invoke("[llama.cpp] Installation cancelled — rolling back");
-            Rollback(backupPath, targetDirectory);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Install error: {ex.Message}");
-            Rollback(backupPath, targetDirectory);
-            return false;
-        }
-    }
-
-    private void CopyDirectoryContents(
-        string sourceDir,
-        string targetDir,
-        CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        Directory.CreateDirectory(targetDir);
-
-        foreach (var file in Directory.EnumerateFiles(sourceDir))
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var fileName = Path.GetFileName(file);
-            var destination = Path.Combine(targetDir, fileName);
-            if (fileName.Contains("llama-server", StringComparison.OrdinalIgnoreCase))
-            {
-                var sourceSize = new FileInfo(file).Length;
-                LogMessage?.Invoke(
-                    $"[llama.cpp] CopyDirectoryContents: {fileName} -> {destination} ({sourceSize} bytes)");
-            }
-
-            File.Copy(file, destination, overwrite: true);
-        }
-
-        foreach (var subdirectory in Directory.EnumerateDirectories(sourceDir))
-        {
-            ct.ThrowIfCancellationRequested();
-            var destination = Path.Combine(targetDir, Path.GetFileName(subdirectory));
-            CopyDirectoryContents(subdirectory, destination, ct);
-        }
-    }
-
-    private void MakeBinariesExecutable(string directory, CancellationToken ct)
-    {
-        if (OperatingSystem.IsWindows())
-            return;
-
-        foreach (var file in Directory.EnumerateFiles(directory, "*.dylib"))
-        {
-            ct.ThrowIfCancellationRequested();
-
-            try
-            {
-                if (IsSymlink(file))
-                    File.Delete(file);
-            }
-            catch (Exception ex)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Symlink cleanup warning for {Path.GetFileName(file)}: {ex.Message}");
-            }
-        }
-
-        foreach (var file in Directory.EnumerateFiles(directory))
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var name = Path.GetFileName(file);
-            if (!IsExecutableBinaryName(name))
-                continue;
-
-            try
-            {
-                var mode = File.GetUnixFileMode(file);
-                mode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
-                File.SetUnixFileMode(file, mode);
-            }
-            catch (Exception ex)
-            {
-                LogMessage?.Invoke($"[llama.cpp] Permission update failed for {name}: {ex.Message}");
-            }
-        }
-
-        // Create versioned .dylib symlinks for the newest version only.
-        // Pattern: libfoo.0.0.9660.dylib → libfoo.0.0.dylib → libfoo.0.dylib
-        var dylibGroups = new Dictionary<string, (string Path, int Minor, int Patch)>();
-        foreach (var file in Directory.EnumerateFiles(directory, "*.dylib"))
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var name = Path.GetFileNameWithoutExtension(file);
-            var parts = name.Split('.');
-            if (parts.Length < 4 ||
-                !int.TryParse(parts[^3], out _) ||
-                !int.TryParse(parts[^2], out var minor) ||
-                !int.TryParse(parts[^1], out var patch) ||
-                (minor == 0 && patch == 0))
-            {
-                continue;
-            }
-
-            var baseName = string.Join(".", parts.Take(parts.Length - 2));
-            if (!dylibGroups.TryGetValue(baseName, out var current) ||
-                current.Minor < minor ||
-                (current.Minor == minor && current.Patch < patch))
-            {
-                dylibGroups[baseName] = (file, minor, patch);
-            }
-        }
-
-        foreach (var group in dylibGroups.Values)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var name = Path.GetFileNameWithoutExtension(group.Path);
-            var parts = name.Split('.');
-            var firstLinkName = string.Join(".", parts.Take(parts.Length - 1)) + ".dylib";
-            var firstLinkPath = Path.Combine(directory, firstLinkName);
-            CreateSymlink(firstLinkPath, name + ".dylib");
-
-            var secondLinkName = string.Join(".", parts.Take(parts.Length - 2)) + ".dylib";
-            var secondLinkPath = Path.Combine(directory, secondLinkName);
-            CreateSymlink(secondLinkPath, firstLinkName);
-        }
-    }
-
-    private static bool IsExecutableBinaryName(string name) =>
-        name.StartsWith("llama", StringComparison.Ordinal) ||
-        name.StartsWith("ggml", StringComparison.Ordinal) ||
-        name.Equals("rpc-server", StringComparison.Ordinal);
-
-    private static bool IsSymlink(string path)
-    {
-        try
-        {
-            return new FileInfo(path).LinkTarget is not null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private void CreateSymlink(string linkPath, string target)
-    {
-        try
-        {
-            if (File.Exists(linkPath) || IsSymlink(linkPath))
-                File.Delete(linkPath);
-
-            File.CreateSymbolicLink(linkPath, target);
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Symlink creation warning for {Path.GetFileName(linkPath)}: {ex.Message}");
-        }
-    }
-
-    private void Rollback(string backupPath, string targetDirectory)
-    {
-        LogMessage?.Invoke("[llama.cpp] Rolling back to backup...");
-
-        try
-        {
-            // Clear target directory
-            if (Directory.Exists(targetDirectory))
-            {
-                foreach (var file in Directory.GetFiles(targetDirectory))
-                    File.Delete(file);
-                foreach (var subdir in Directory.GetDirectories(targetDirectory))
-                    DeleteDirectory(subdir);
-            }
-
-            // Restore from backup
-            if (Directory.Exists(backupPath))
-            {
-                CopyDirectoryContents(backupPath, targetDirectory);
-                LogMessage?.Invoke("[llama.cpp] Rollback complete");
-            }
-            else
-            {
-                LogMessage?.Invoke("[llama.cpp] Rollback failed — backup not found");
-            }
-        }
-         catch (Exception ex)
-             {
-                 LogMessage?.Invoke($"[llama.cpp] Rollback error: {ex.Message}");
-             }
-        }
-
-        /// <summary>
-        /// Kill any running llama-server/llama-cpp processes to release file handles before install.
-        /// Uses graceful SIGTERM first, then forceful kill as fallback.
-        /// </summary>
-        private async Task KillLlamaServerProcessesAsync(string targetDirectory, CancellationToken ct)
-        {
-            var serverExe = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? "llama-server.exe"
-                : "llama-server";
-            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-
-            var serverPath = Path.GetFullPath(Path.Combine(targetDirectory, serverExe));
-            var processesToKill = new List<Process>();
-
-            try
-            {
-                foreach (var process in Process.GetProcessesByName("llama-server"))
-                {
-                    try
-                    {
-                        var processPath = process.MainModule?.FileName;
-                        if (processPath != null &&
-                            string.Equals(Path.GetFullPath(processPath), serverPath, comparison))
-                        {
-                            processesToKill.Add(process);
-                        }
-                        else
-                        {
-                            process.Dispose();
-                        }
-                    }
-                    catch
-                    {
-                        process.Dispose();
-                    }
-                }
-            }
-            catch { }
-
-            if (processesToKill.Count == 0)
-            {
-                LogMessage?.Invoke("[llama.cpp] No running llama-server processes found");
-                return;
-            }
-
-            try
-            {
-                LogMessage?.Invoke($"[llama.cpp] Found {processesToKill.Count} llama-server process(es) to stop");
-
-                foreach (var process in processesToKill)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    try
-                    {
-                        LogMessage?.Invoke($"[llama.cpp] Sending graceful stop to llama-server pid={process.Id}");
-                        if (process.HasExited)
-                            continue;
-
-                        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                        {
-                            var startInfo = new ProcessStartInfo
-                            {
-                                FileName = "taskkill.exe",
-                                Arguments = $"/T /PID {process.Id}",
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            };
-
-                            using var taskKill = Process.Start(startInfo);
-                            if (taskKill != null)
-                                await taskKill.WaitForExitAsync(ct);
-                        }
-                        else
-                        {
-                            process.Kill(entireProcessTree: false);
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        LogMessage?.Invoke($"[llama.cpp] Graceful stop failed pid={process.Id}: {ex.Message}");
-                    }
-                }
-
-                foreach (var process in processesToKill)
-                {
-                    try
-                    {
-                        if (!process.HasExited)
-                            await process.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(5), ct);
-                    }
-                    catch (TimeoutException) { }
-                    catch (InvalidOperationException) { }
-                }
-
-                foreach (var process in processesToKill)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            LogMessage?.Invoke($"[llama.cpp] Force killing llama-server pid={process.Id}");
-                            process.Kill(entireProcessTree: true);
-                            await process.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(2), ct);
-                        }
-                    }
-                    catch (TimeoutException) { }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        LogMessage?.Invoke($"[llama.cpp] Force kill failed pid={process.Id}: {ex.Message}");
-                    }
-                }
-
-                LogMessage?.Invoke("[llama.cpp] llama-server processes stopped");
-            }
-            finally
-            {
-                foreach (var process in processesToKill)
-                    process.Dispose();
-            }
-        }
-
-        // ---- Local Version Detection ----
-
-        private string? DetectLocalVersion(string targetDirectory)
-    {
-        // Try to find llama-server binary and check version
-        var serverPath = Path.Combine(targetDirectory, "llama-server");
-        LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion checking: {serverPath} (exists: {File.Exists(serverPath)})");
-        if (!File.Exists(serverPath))
-        {
-            // Try with .exe suffix on Windows
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                serverPath = serverPath + ".exe";
-                if (!File.Exists(serverPath)) return null;
-            }
-            else
-            {
-                return null;
-            }
-        }
-
-        // Clean up old symlinks that may point to old versioned dylibs
-        // (these cause the binary to crash when loading incompatible dylibs)
-        try
-        {
-            foreach (var file in Directory.GetFiles(targetDirectory, "*.dylib"))
-            {
-                if (IsSymlink(file))
-                {
-                    File.Delete(file);
-                    LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion removed old symlink: {Path.GetFileName(file)}");
-                }
-            }
-
-             // Create symlinks for NEWEST versioned dylibs only (old versions overwrite if we create all)
-            // Group by base name, find highest version, create symlinks only for that
-            var dylibGroups = new Dictionary<string, (string path, int minor, int patch)>();
-            foreach (var file in Directory.GetFiles(targetDirectory, "*.dylib"))
-            {
-                var name = Path.GetFileNameWithoutExtension(file); // e.g. libllama-common.0.0.9660
-                var parts = name.Split('.');
-                if (parts.Length >= 4 &&
-                    int.TryParse(parts[^3], out var major) &&
-                    int.TryParse(parts[^2], out var minor) &&
-                    int.TryParse(parts[^1], out var patch) &&
-                    !(parts[^2] == "0" && parts[^1] == "0"))
-                {
-                    var baseName = string.Join(".", parts.Take(parts.Length - 2)); // e.g. libllama-common.0
-                    if (!dylibGroups.ContainsKey(baseName) ||
-                    dylibGroups[baseName].minor < minor ||
-                    (dylibGroups[baseName].minor == minor && dylibGroups[baseName].patch < patch))
-                    {
-                        dylibGroups[baseName] = (file, minor, patch);
-                    }
-                }
-            }
-
-            // Create symlinks only for the highest version of each library
-            foreach (var group in dylibGroups.Values)
-            {
-                var name = Path.GetFileNameWithoutExtension(group.path);
-                var parts = name.Split('.');
-                var link1 = string.Join(".", parts.Take(parts.Length - 1)) + ".dylib";
-                var link1Path = Path.Combine(targetDirectory, link1);
-                try { CreateSymlink(link1Path, name + ".dylib"); } catch { }
-
-                var link2 = string.Join(".", parts.Take(parts.Length - 2)) + ".dylib";
-                var link2Path = Path.Combine(targetDirectory, link2);
-                try { CreateSymlink(link2Path, link1); } catch { }
-            }
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion symlink cleanup warning: {ex.Message}");
-        }
-
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = serverPath,
-                Arguments = "--version",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion starting process: {serverPath} --version");
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc == null)
-            {
-
-                LogMessage?.Invoke("[llama.cpp] DetectLocalVersion Process.Start returned null");
-                return null;
-            }
-            LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion process handle obtained: {proc.Handle}");
-            // Read streams FIRST (before WaitForExit can cause issues)
-            var stderr = proc.StandardError.ReadToEnd();
-            var stdout = proc.StandardOutput.ReadToEnd();
-            var exited = proc.WaitForExit(5000);
-            var exitCode = proc.ExitCode;
-            var output = stderr + stdout;
-            LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion exited: {exited}, code: {exitCode}");
-            LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion output: '{output}'");
-
-            // Parse version from output: "version: 9553 (9e3b928fd)"
-                   // GitHub tags use the DECIMAL build number (e.g., b9660, b9659)
-                   // Priority 1: Extract decimal build number, format as "b{decimal}"
-                   var match = Regex.Match(output, @"version:\s+(\d+)", RegexOptions.IgnoreCase);
-                   if (match.Success)
-                   {
-                       return $"b{match.Groups[1].Value}";
-                   }
-
-            // Priority 2: Fallback to commit hash (b + 5+ hex chars in parentheses)
-            match = System.Text.RegularExpressions.Regex.Match(output, @"\(([0-9a-fA-F]{5,})\)");
-            if (match.Success)
-            {
-                var hash = match.Groups[1].Value;
-                // GitHub uses 'b' prefix + short hash (first 5 chars)
-                return $"b{hash.Substring(0, Math.Min(5, hash.Length))}";
-            }
-
-            return null;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] DetectLocalVersion EXCEPTION: {ex.GetType().Name}: {ex.Message}");
-            return null;
-        }
-    }
-
-    // ---- Helpers ----
+    private void Log(string message) => LogMessage?.Invoke(message);
 
     private string CreateTempDirectory(string tag)
     {
-        Directory.CreateDirectory(_downloadsDir);
-        var dirName = $"llama-cpp-{tag}-{DateTime.UtcNow:yyyyMMddHHmmss}";
-        var dir = Path.Combine(_downloadsDir, dirName);
-        Directory.CreateDirectory(dir);
-        return dir;
+        Directory.CreateDirectory(_downloadsDirectory);
+        var safeTag = string.IsNullOrWhiteSpace(tag) ? "unknown" : tag;
+        var directory = Path.Combine(
+            _downloadsDirectory,
+            $"llama-cpp-{safeTag}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        return directory;
     }
 
-    private void CopyDirectory(string source, string target)
+    private static HttpClient CreateHttpClient()
     {
-        if (!Directory.Exists(source)) return;
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        client.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaSwapManager");
 
-        if (!Directory.Exists(target))
-            Directory.CreateDirectory(target);
-
-        foreach (var file in Directory.GetFiles(source))
+        var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        if (!string.IsNullOrWhiteSpace(token))
         {
-            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         }
 
-        foreach (var subdir in Directory.GetDirectories(source))
-        {
-            CopyDirectory(subdir, Path.Combine(target, Path.GetFileName(subdir)));
-        }
-    }
-
-    private void DeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path))
-                Directory.Delete(path, recursive: true);
-        }
-        catch { /* best effort cleanup */ }
-    }
-
-    private static bool HasEnoughDiskSpace(string path, long requiredBytes)
-    {
-        try
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                var drive = DriveInfo.GetDrives().FirstOrDefault(d => path.StartsWith(d.RootDirectory.FullName, StringComparison.OrdinalIgnoreCase));
-                return drive?.AvailableFreeSpace > requiredBytes;
-            }
-            else
-            {
-                // Use statvfs on Unix
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "stat",
-                    Arguments = $"-f %a*%s {path}",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    CreateNoWindow = true
-                };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                proc?.WaitForExit(3000);
-                var output = proc?.StandardOutput.ReadToEnd()?.Trim();
-                if (!string.IsNullOrEmpty(output))
-                {
-                    var parts = output.Split(' ');
-                    if (parts.Length == 2 && long.TryParse(parts[0], out var freeBlocks) && long.TryParse(parts[1], out var blockSize))
-                    {
-                        return (freeBlocks * blockSize) > requiredBytes;
-                    }
-                }
-            }
-        }
-        catch { }
-
-        // If we can't check, assume there's enough space (safer to proceed)
-        return true;
+        return client;
     }
 
     private static string FormatSize(long bytes)
@@ -1224,281 +191,4 @@ public class LlamaCppDownloader : IDisposable
         if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
-
-    private static string ShellQuote(string s)
-    {
-        return "'" + s.Replace("'", "'\\''") + "'";
-    }
-
-    public void Dispose()
-    {
-        _http?.Dispose();
-    }
-
-    // ---- CUDA Version-Aware Asset Selection ----
-
-    /// <summary>
-    /// Represents a CUDA-related asset parsed from a GitHub release.
-    /// </summary>
-    internal record CudaAsset(
-        string Name,
-        string Url,
-        long Size,
-        string Digest,
-        CudaAssetType AssetType,
-        string CudaVersion);
-
-    /// <summary>
-    /// Type of CUDA asset: llama build or cudart runtime.
-    /// </summary>
-    internal enum CudaAssetType
-    {
-        LlamaBuild,
-        Cudart
-    }
-
-    /// <summary>
-    /// Result of asset detection, including the main asset and any associated cudart assets.
-    /// </summary>
-    internal record DetectedAsset(
-        string Name,
-        long Size,
-        string Url,
-        string Digest,
-        IReadOnlyList<CudaAsset> CudartAssets);
-
-    /// <summary>
-    /// Regex to parse CUDA version from asset names like "llama-cuda12.4-win-cuda-12.4-x64-release.tar.gz".
-    /// Captures major.minor (and optional patch) as group 1.
-    /// </summary>
-    private static readonly Regex CudaAssetVersionRegex = new(
-        @"cuda(\d+\.\d+(?:\.\d+)?)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    /// <summary>
-    /// Regex to match cudart runtime assets.
-    /// Matches patterns like "cudart-cuda12.4-win-12.4-x64.tar.gz" or "cudart-cuda-12.4-ubuntu-x64.tar.gz".
-    /// </summary>
-    private static readonly Regex CudartAssetRegex = new(
-        @"cudart-cuda[\-_](\d+\.\d+(?:\.\d+)?)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    /// <summary>
-    /// Regex to match llama CUDA build assets (not cudart).
-    /// Matches patterns like "llama-b9670-bin-win-cuda-12.4-x64-release.tar.gz".
-    /// </summary>
-    private static readonly Regex LlamaCudaBuildRegex = new(
-        @"llama\b.*cuda-\d+\.\d+",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    /// <summary>
-    /// Parse CUDA-related assets from a GitHub release.
-    /// Returns both llama CUDA builds and cudart runtime assets.
-    /// </summary>
-    private List<CudaAsset> ParseCudaAssets(JsonElement release)
-    {
-        var cudaAssets = new List<CudaAsset>();
-
-        if (!release.TryGetProperty("assets", out var assets))
-            return cudaAssets;
-
-        foreach (var asset in assets.EnumerateArray())
-        {
-            var name = asset.GetProperty("name").GetString() ?? "";
-
-            // Check for cudart runtime assets
-            var cudartMatch = CudartAssetRegex.Match(name);
-            if (cudartMatch.Success)
-            {
-                var cudaVersion = cudartMatch.Groups[1].Value;
-                cudaAssets.Add(new CudaAsset(
-                    name,
-                    asset.GetProperty("browser_download_url").GetString() ?? "",
-                    asset.GetProperty("size").GetInt64(),
-                    asset.GetProperty("digest").GetString() ?? "",
-                    CudaAssetType.Cudart,
-                    cudaVersion));
-                continue;
-            }
-
-            // Check for llama CUDA build assets
-            if (LlamaCudaBuildRegex.IsMatch(name) ||
-                (name.Contains("cuda", StringComparison.OrdinalIgnoreCase) &&
-                 name.Contains("llama", StringComparison.OrdinalIgnoreCase)))
-            {
-                var versionMatch = CudaAssetVersionRegex.Match(name);
-                if (versionMatch.Success)
-                {
-                    var cudaVersion = versionMatch.Groups[1].Value;
-                    cudaAssets.Add(new CudaAsset(
-                        name,
-                        asset.GetProperty("browser_download_url").GetString() ?? "",
-                        asset.GetProperty("size").GetInt64(),
-                        asset.GetProperty("digest").GetString() ?? "",
-                        CudaAssetType.LlamaBuild,
-                        cudaVersion));
-                }
-            }
-        }
-
-        return cudaAssets;
-    }
-
-    /// <summary>
-    /// Find the best CUDA asset matching the installed CUDA version.
-    /// Priority: exact match → same major version → newest available.
-    /// </summary>
-    private CudaAsset? FindBestCudaAsset(List<CudaAsset> cudaAssets, string installedCudaVersion)
-    {
-        if (!cudaAssets.Any())
-            return null;
-
-        var installedParts = installedCudaVersion.Split('.');
-        var installedMajor = installedParts[0];
-        var installedMinor = installedParts.Length > 1 ? installedParts[1] : "0";
-
-        // 1. Exact match
-        var exactMatch = cudaAssets.FirstOrDefault(a => a.CudaVersion == installedCudaVersion);
-        if (exactMatch != null)
-        {
-            LogMessage?.Invoke($"[llama.cpp] Found exact CUDA {installedCudaVersion} asset: {exactMatch.Name}");
-            return exactMatch;
-        }
-
-        // 2. Major version match (e.g. CUDA 12.6 → 12.4)
-        var majorMatches = cudaAssets
-            .Where(a => a.CudaVersion.Split('.')[0] == installedMajor)
-            .ToList();
-
-        if (majorMatches.Any())
-        {
-            // Pick the highest minor version among major matches
-            var best = majorMatches.OrderByDescending(a => ParseVersionComponents(a.CudaVersion)).ToList()[0];
-            LogMessage?.Invoke($"[llama.cpp] No exact CUDA match for {installedCudaVersion}, using CUDA {best.CudaVersion} asset: {best.Name}");
-            return best;
-        }
-
-        // 3. Fallback: newest available
-        var newest = cudaAssets.OrderByDescending(a => ParseVersionComponents(a.CudaVersion)).First();
-        LogMessage?.Invoke($"[llama.cpp] No CUDA {installedMajor}.x match, using newest available: {newest.Name}");
-        return newest;
-    }
-
-    /// <summary>
-    /// Parse version components for comparison. Returns (major * 1000 + minor, patch).
-    /// </summary>
-    private static (int majorMinor, int patch) ParseVersionComponents(string version)
-    {
-        var parts = version.Split('.');
-        var major = int.TryParse(parts[0], out var m) ? m : 0;
-        var minor = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 0;
-        var patch = parts.Length > 2 && int.TryParse(parts[2], out var p) ? p : 0;
-        return (major * 1000 + minor, patch);
-    }
-
-    /// <summary>
-    /// Download and extract cudart runtime libraries from the matched asset.
-    /// Non-critical — failures are logged but don't block installation.
-    /// </summary>
-    private async Task<bool> DownloadCudaRuntimeAsync(
-        CudaAsset? cudartAsset,
-        string targetDirectory,
-        CancellationToken ct)
-    {
-        if (cudartAsset == null)
-        {
-            LogMessage?.Invoke("[llama.cpp] No cudart asset to download");
-            return true;
-        }
-
-        try
-        {
-            LogMessage?.Invoke($"[llama.cpp] Downloading CUDA {cudartAsset.CudaVersion} runtime libraries...");
-
-            // Create temp file for the cudart archive
-            var tempArchive = Path.Combine(_downloadsDir, $"cudart-{cudartAsset.CudaVersion}.tar.gz");
-
-            // Download the cudart archive
-            using var response = await _http.GetAsync(cudartAsset.Url, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                LogMessage?.Invoke($"[llama.cpp] cudart download failed: {(int)response.StatusCode} {response.StatusCode}");
-                return false;
-            }
-
-            using var stream = await response.Content.ReadAsStreamAsync(ct);
-            using var fileStream = new FileStream(tempArchive, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-            await stream.CopyToAsync(fileStream, 81920, ct);
-
-            // Extract to target directory
-            var stagingDir = Path.Combine(_downloadsDir, $"cudart-staging-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(stagingDir);
-
-            try
-            {
-                ArchiveExtractor.ExtractTarGz(tempArchive, stagingDir, ct);
-
-                // Copy extracted files to target directory
-                CopyDirectoryContents(stagingDir, targetDirectory, ct);
-                LogMessage?.Invoke("[llama.cpp] CUDA runtime libraries installed");
-
-                // Make binaries executable on Unix
-                MakeBinariesExecutable(targetDirectory, ct);
-            }
-            finally
-            {
-                // Clean up staging and temp archive
-                DeleteDirectory(stagingDir);
-                try { File.Delete(tempArchive); } catch { }
-            }
-
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[llama.cpp] cudart download error (non-fatal): {ex.Message}");
-            return false;
-        }
-    }
-
-    // ---- End CUDA Version-Aware Asset Selection ----
-
-    // =====================================================================
-    // H1: macOS codesign verification
-    // =====================================================================
-
-    /// <summary>
-    /// Verifies that a macOS binary has a valid codesignature.
-    /// Returns true if codesign --verify succeeds.
-    /// Does NOT block installation — only logs a warning if verification fails.
-    /// </summary>
-    private bool VerifyCodesign(string exePath)
-    {
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "codesign",
-                Arguments = $"--verify --verbose=2 \"{exePath}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc == null) return false;
-
-            proc.WaitForExit(10000);
-            var output = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
-            return proc.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }}
+}
