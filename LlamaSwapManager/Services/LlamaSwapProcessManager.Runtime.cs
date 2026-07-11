@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,27 +14,36 @@ namespace LlamaSwapManager.Services;
 public partial class LlamaSwapProcessManager : IDisposable
 {
     public async Task<string?> GetRunningModelAsync()
+    {
+        var baseUrl = await DetectApiBaseUrlAsync();
+        if (baseUrl is null)
+            return null;
+
+        try
         {
-            var baseUrl = await DetectApiBaseUrlAsync();
-            if (baseUrl is null) return null;
-    
-            try
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                var response = await http.GetAsync($"{baseUrl}/running");
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync();
-                    var modelMatch = System.Text.RegularExpressions.Regex.Match(json, "\"model\"\\s*:\\s*\"([^\"]+)\"");
-                    if (modelMatch.Success)
-                        return modelMatch.Groups[1].Value;
-                }
-            }
-            catch { }
-    
+            using var response = await _localHttpClient.GetAsync($"{baseUrl}/running");
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var document = await JsonDocument.ParseAsync(stream);
+            if (!document.RootElement.TryGetProperty("running", out var running) ||
+                running.ValueKind != JsonValueKind.Array ||
+                running.GetArrayLength() == 0)
+                return null;
+
+            var first = running[0];
+            return first.TryGetProperty("model", out var model)
+                ? model.GetString()
+                : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            LogMessage?.Invoke($"[manager] running model detection failed: {ex.Message}");
             return null;
         }
-    
+    }
+
         private async Task TryUnloadModelAsync()
         {
             var baseUrl = await DetectApiBaseUrlAsync();
@@ -42,9 +52,11 @@ public partial class LlamaSwapProcessManager : IDisposable
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 LogMessage?.Invoke($"[manager] unloading model via {baseUrl}/api/models/unload");
-                var response = await http.PostAsync($"{baseUrl}/api/models/unload", null, cts.Token);
+                using var response = await _localHttpClient.PostAsync(
+                    $"{baseUrl}/api/models/unload",
+                    null,
+                    cts.Token);
                 LogMessage?.Invoke($"[manager] unload response: {(int)response.StatusCode} {response.StatusCode}");
                 await Task.Delay(response.IsSuccessStatusCode ? 300 : 100, cts.Token);
             }
@@ -52,80 +64,10 @@ public partial class LlamaSwapProcessManager : IDisposable
             {
                 LogMessage?.Invoke("[manager] unload timed out — continuing stop");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
             {
                 LogMessage?.Invoke($"[manager] unload failed: {ex.Message}");
             }
-        }
-    
-        private async Task KillProcessTreeAsync()
-        {
-            var swapProcesses = Process.GetProcessesByName("llama-swap");
-            foreach (var p in swapProcesses)
-                await KillProcessTreeInternalAsync(p.Id);
-    
-            await Task.Delay(2000);
-    
-            var serverProcesses = Process.GetProcessesByName("llama-server");
-            foreach (var p in serverProcesses)
-                await KillProcessTreeInternalAsync(p.Id);
-        }
-    
-        private Task KillProcessTreeInternalAsync(int processId)
-        {
-            try
-            {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "taskkill.exe",
-                        Arguments = $"/F /T /PID {processId}",
-                        UseShellExecute = true,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    var proc = Process.Start(psi);
-                    return proc?.WaitForExitAsync() ?? Task.CompletedTask;
-                }
-                else
-                {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "pkill",
-                        Arguments = $"-P {processId}",
-                        UseShellExecute = true,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    Process.Start(psi)?.WaitForExit();
-    
-                    try
-                    {
-                        var proc = Process.GetProcessById(processId);
-                        proc.Kill(true);
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-    
-            return Task.CompletedTask;
-        }
-    
-        private async Task<bool> WaitForStoppedAsync(int timeoutSeconds)
-        {
-            var deadline = DateTime.Now.AddSeconds(timeoutSeconds);
-            while (DateTime.Now < deadline)
-            {
-                var swapRunning = Process.GetProcessesByName("llama-swap").Length > 0;
-                var serverRunning = Process.GetProcessesByName("llama-server").Length > 0;
-                if (!swapRunning && !serverRunning)
-                    return true;
-                await Task.Delay(250);
-            }
-            return Process.GetProcessesByName("llama-swap").Length == 0 &&
-                   Process.GetProcessesByName("llama-server").Length == 0;
         }
     
         private async Task<bool> WaitForApiReadyAsync(int timeoutSeconds)
@@ -168,30 +110,29 @@ public partial class LlamaSwapProcessManager : IDisposable
     
         public async Task<string?> DetectApiBaseUrlAsync()
         {
-            // llama-swap default port — just test it directly
+            using var managedProcesses = new ProcessCollection(GetManagedLlamaProcesses());
+            var swapProcesses = managedProcesses.Processes
+                .Where(process => process.ProcessName.Equals("llama-swap", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (swapProcesses.Count == 0)
+                return null;
+
             if (await TestEndpointAsync("http://127.0.0.1:8080"))
                 return "http://127.0.0.1:8080";
-    
-            // Fallback: try to find llama-swap process and detect port
-            var swapProcesses = Process.GetProcessesByName("llama-swap");
+
             foreach (var swap in swapProcesses)
             {
-                try
+                foreach (var port in await GetListeningPortsAsync(swap.Id))
                 {
-                    var ports = GetListeningPorts(swap.Id);
-                    foreach (var port in ports)
-                    {
-                        var baseUrl = $"http://127.0.0.1:{port}";
-                        if (await TestEndpointAsync(baseUrl))
-                            return baseUrl;
-                    }
+                    var baseUrl = $"http://127.0.0.1:{port}";
+                    if (await TestEndpointAsync(baseUrl))
+                        return baseUrl;
                 }
-                catch { }
             }
-    
+
             return null;
         }
-    
+
         /// <summary>
         /// Detects the upstream llama-server URL by querying llama-swap's /running endpoint.
         /// The /running response includes a "proxy" field with the llama-server address.
@@ -199,182 +140,259 @@ public partial class LlamaSwapProcessManager : IDisposable
         /// </summary>
         public async Task<string?> DetectLlamaServerBaseUrlAsync()
         {
-            // Primary: query llama-swap /running for the upstream proxy URL
             var swapBaseUrl = await DetectApiBaseUrlAsync();
             if (swapBaseUrl is not null)
             {
                 try
                 {
-                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                    var response = await http.GetAsync($"{swapBaseUrl}/running");
+                    using var response = await _localHttpClient.GetAsync($"{swapBaseUrl}/running");
                     if (response.IsSuccessStatusCode)
                     {
-                        var json = await response.Content.ReadAsStringAsync();
-                        // Extract "proxy" from the first running entry:
-                        // {"running":[{"model":"...","proxy":"http://localhost:5801",...}]}
-                        var proxyMatch = System.Text.RegularExpressions.Regex.Match(
-                            json,
-                            "\"proxy\"\\s*:\\s*\"([^\"]+)\"");
-                        if (proxyMatch.Success)
+                        await using var stream = await response.Content.ReadAsStreamAsync();
+                        using var document = await JsonDocument.ParseAsync(stream);
+                        if (document.RootElement.TryGetProperty("running", out var running) &&
+                            running.ValueKind == JsonValueKind.Array &&
+                            running.GetArrayLength() > 0 &&
+                            running[0].TryGetProperty("proxy", out var proxy))
                         {
-                            var proxyUrl = proxyMatch.Groups[1].Value;
-                            // Normalize: llama-swap returns "localhost", ensure we use 127.0.0.1
-                            proxyUrl = proxyUrl.Replace("localhost", "127.0.0.1");
-                            return proxyUrl;
+                            return proxy.GetString()?.Replace(
+                                "localhost",
+                                "127.0.0.1",
+                                StringComparison.OrdinalIgnoreCase);
                         }
                     }
                 }
-                catch { }
-            }
-    
-            // Fallback: port scan 5800-5900 for llama-server /health
-            for (var port = 5800; port <= 5900; port++)
-            {
-                var baseUrl = $"http://127.0.0.1:{port}";
-                try
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
                 {
-                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-                    var response = await http.GetAsync($"{baseUrl}/health");
-                    if (response.IsSuccessStatusCode)
+                    LogMessage?.Invoke($"[manager] upstream URL detection failed: {ex.Message}");
+                }
+            }
+
+            using var managedProcesses = new ProcessCollection(GetManagedLlamaProcesses());
+            foreach (var server in managedProcesses.Processes.Where(process =>
+                         process.ProcessName.Equals("llama-server", StringComparison.OrdinalIgnoreCase)))
+            {
+                foreach (var port in await GetListeningPortsAsync(server.Id))
+                {
+                    var baseUrl = $"http://127.0.0.1:{port}";
+                    if (await TestHealthEndpointAsync(baseUrl))
                         return baseUrl;
                 }
-                catch { }
             }
-    
+
             return null;
         }
-    
-        private HashSet<int> GetListeningPorts(int processId)
+
+        private async Task<HashSet<int>> GetListeningPortsAsync(
+            int processId,
+            CancellationToken cancellationToken = default)
         {
             var ports = new HashSet<int>();
-    
+
             try
             {
-         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                ProcessStartInfo startInfo;
+                if (OperatingSystem.IsWindows())
                 {
-                    var psi = new ProcessStartInfo
+                    startInfo = new ProcessStartInfo
                     {
-                        FileName = "powershell.exe",
-                        Arguments = $"Get-NetTCPConnection -OwningProcess {processId} -State Listen | Select-Object -ExpandProperty LocalPort",
+                        FileName = "netstat.exe",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
+                        RedirectStandardError = true,
                         CreateNoWindow = true
                     };
-                    using var proc = Process.Start(psi);
-                    // Guard against infinite hang: 5s timeout on the whole operation.
-                    var exited = proc?.WaitForExit(5000) ?? false;
-                    if (!exited)
-                    {
-                        try { proc?.Kill(true); } catch { }
-                        return ports;
-                    }
-                    var output = proc?.StandardOutput.ReadToEnd();
-                    if (output is not null)
-                    {
-                        foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-                        {
-                            if (int.TryParse(line.Trim(), out var port))
-                                ports.Add(port);
-                        }
-                    }
+                    startInfo.ArgumentList.Add("-ano");
+                    startInfo.ArgumentList.Add("-p");
+                    startInfo.ArgumentList.Add("tcp");
                 }
                 else
                 {
-                    // CRITICAL: lsof -p on macOS returns ALL system ports, not just for the process.
-                    // We must filter by the COMMAND column matching the target process name.
-                    var psi = new ProcessStartInfo
+                    startInfo = new ProcessStartInfo
                     {
-                        FileName = "lsof",
-                        Arguments = $"-iTCP -sTCP:LISTEN -p {processId} -nP",
+                        FileName = "/usr/sbin/lsof",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
+                        RedirectStandardError = true,
                         CreateNoWindow = true
                     };
-                    using var proc = Process.Start(psi);
-                    var output = proc?.StandardOutput.ReadToEnd();
-                    if (output is not null)
-                    {
-                        foreach (var line in output.Split('\n'))
-                        {
-                            // Only accept lines that start with the target process name
-                            var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                            if (parts.Length < 1) continue;
-                            var cmd = parts[0];
-                            // Filter: only lines where COMMAND matches the target process
-                            if (cmd != "llama-swap" && cmd != "llama-server" && cmd != "LlamaSwapManager.Desktop")
-                                continue;
-    
-                            // Now extract port from the NAME column (last field)
-                            var namePart = parts[^1];
-                            if ((namePart.StartsWith("*:") || namePart.StartsWith("127.0.0.1:")) && namePart.Contains(':'))
-                            {
-                                var portStr = namePart.Split(':')[^1];
-                                if (int.TryParse(portStr, out var port))
-                                    ports.Add(port);
-                            }
-                        }
-                    }
+                    startInfo.ArgumentList.Add("-a");
+                    startInfo.ArgumentList.Add("-iTCP");
+                    startInfo.ArgumentList.Add("-sTCP:LISTEN");
+                    startInfo.ArgumentList.Add("-p");
+                    startInfo.ArgumentList.Add(processId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    startInfo.ArgumentList.Add("-nP");
                 }
+
+                using var process = Process.Start(startInfo);
+                if (process is null)
+                    return ports;
+
+                var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+                await process.WaitForExitAsync(cancellationToken)
+                    .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+                var output = await outputTask;
+
+                if (OperatingSystem.IsWindows())
+                    ParseWindowsNetstat(output, processId, ports);
+                else
+                    ParseLsof(output, ports);
             }
-            catch { }
-    
+            catch (TimeoutException)
+            {
+                LogMessage?.Invoke($"[manager] port detection timed out for pid={processId}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                LogMessage?.Invoke($"[manager] port detection failed for pid={processId}: {ex.Message}");
+            }
+
             return ports;
         }
-    
+
+        internal static void ParseWindowsNetstat(
+            string output,
+            int processId,
+            ISet<int> ports)
+        {
+            foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 5 ||
+                    !parts[0].Equals("TCP", StringComparison.OrdinalIgnoreCase) ||
+                    !parts[3].Equals("LISTENING", StringComparison.OrdinalIgnoreCase) ||
+                    !int.TryParse(parts[^1], out var pid) ||
+                    pid != processId)
+                    continue;
+
+                if (TryParsePort(parts[1], out var port))
+                    ports.Add(port);
+            }
+        }
+
+        internal static void ParseLsof(string output, ISet<int> ports)
+        {
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                    continue;
+
+                var endpoint = parts.Reverse().FirstOrDefault(part => part.Contains(':'));
+                if (endpoint is not null && TryParsePort(endpoint, out var port))
+                    ports.Add(port);
+            }
+        }
+
+        private static bool TryParsePort(string endpoint, out int port)
+        {
+            port = 0;
+            var value = endpoint;
+            var arrow = value.IndexOf("->", StringComparison.Ordinal);
+            if (arrow >= 0)
+                value = value[..arrow];
+
+            var colon = value.LastIndexOf(':');
+            if (colon < 0)
+                return false;
+
+            var portText = value[(colon + 1)..].TrimEnd(')', ' ');
+            return int.TryParse(portText, out port) && port is > 0 and <= 65535;
+        }
+
         private async Task<bool> TestEndpointAsync(string baseUrl)
         {
             try
             {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                var response = await http.GetAsync($"{baseUrl}/running");
+                using var response = await _localHttpClient.GetAsync($"{baseUrl}/running");
                 return response.IsSuccessStatusCode;
             }
-            catch { }
-            return false;
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                return false;
+            }
         }
-    
+
+        private async Task<bool> TestHealthEndpointAsync(string baseUrl)
+        {
+            try
+            {
+                using var response = await _localHttpClient.GetAsync($"{baseUrl}/health");
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                return false;
+            }
+        }
+
         private void SetStatus(LlamaSwapStatus newStatus)
         {
+            var changed = false;
             lock (_lock)
             {
                 if (Status != newStatus)
                 {
                     Status = newStatus;
-                    StatusChanged?.Invoke(Status);
+                    changed = true;
                 }
             }
+
+            if (changed)
+                StatusChanged?.Invoke(newStatus);
         }
-    
+
         private void OnProcessExited(object? sender, EventArgs e)
         {
-            // H3: Remove this PID from managed list
-            if (_process is not null)
+            if (sender is Process exitedProcess)
             {
                 lock (_managedPids)
                 {
-                    _managedPids.Remove(_process.Id);
+                    _managedPids.Remove(exitedProcess.Id);
                 }
             }
-    
+
             SetStatus(LlamaSwapStatus.Stopped);
             ApiBaseUrl = null;
+            LlamaServerBaseUrl = null;
         }
-    
+
         public bool IsRunning()
         {
-            return Process.GetProcessesByName("llama-swap").Length > 0 ||
-                   Process.GetProcessesByName("llama-server").Length > 0;
+            using var processes = new ProcessCollection(GetManagedLlamaProcesses());
+            return processes.Processes.Count > 0;
         }
-    
+
         public bool IsLlamaSwapProcessRunning()
         {
-            return Process.GetProcessesByName("llama-swap").Length > 0;
+            using var processes = new ProcessCollection(GetManagedLlamaProcesses());
+            return processes.Processes.Any(process =>
+                process.ProcessName.Equals("llama-swap", StringComparison.OrdinalIgnoreCase));
         }
-    
-        public bool IsProxyRunning()
+
+        public bool IsProxyRunning() => IsLlamaSwapProcessRunning() || ApiBaseUrl is not null;
+
+        public void Dispose()
         {
-            return Process.GetProcessesByName("llama-swap").Length > 0 || ApiBaseUrl is not null;
+            _process?.Dispose();
+            _llamaCppDownloader?.Dispose();
+            _localHttpClient.Dispose();
         }
-    
-        public void Dispose() { }
+
+        private sealed class ProcessCollection : IDisposable
+        {
+            public IReadOnlyList<Process> Processes { get; }
+
+            public ProcessCollection(IReadOnlyList<Process> processes)
+            {
+                Processes = processes;
+            }
+
+            public void Dispose()
+            {
+                foreach (var process in Processes)
+                    process.Dispose();
+            }
+        }
+
 }

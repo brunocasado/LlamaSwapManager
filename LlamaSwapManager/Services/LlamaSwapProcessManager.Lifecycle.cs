@@ -42,55 +42,22 @@ public partial class LlamaSwapProcessManager : IDisposable
     
             try
             {
-                var args = $"--config \"{ConfigPath}\"";
-    
-                // Unblock file on Windows
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                // Remove the Windows downloaded-file marker without invoking PowerShell.
+                if (OperatingSystem.IsWindows())
                 {
                     try
                     {
-                        // H4: Validate executable path before Unblock-File to prevent command injection
-                        var exeDir = Path.GetDirectoryName(ExecutablePath);
-                        if (string.IsNullOrEmpty(exeDir) || !Directory.Exists(exeDir))
-                        {
-                            LogMessage?.Invoke($"[manager] cannot unblock: directory not found for {ExecutablePath}");
-                        }
-                        else
-                        {
-                            // Verify the file is actually in the expected directory
-                            var resolvedName = Path.GetFileName(ExecutablePath);
-                            var actualPath = Path.Combine(exeDir, resolvedName);
-                            if (!File.Exists(actualPath))
-                            {
-                                LogMessage?.Invoke($"[manager] cannot unblock: file not found at {actualPath}");
-                            }
-                            else
-                            {
-                                var psiUnblock = new ProcessStartInfo
-                                {
-                                    FileName = "powershell.exe",
-                                    Arguments = $"-NoProfile -NonInteractive -Command \"Unblock-File -Path '{actualPath}'\"",
-                                    UseShellExecute = false,
-                                    RedirectStandardOutput = true,
-                                    RedirectStandardError = true,
-                                    CreateNoWindow = true,
-                                    WindowStyle = ProcessWindowStyle.Hidden
-                                };
-                                var proc = Process.Start(psiUnblock);
-                                if (proc is not null)
-                                {
-                                    proc.WaitForExit(5000);
-                                }
-                            }
-                        }
+                        File.Delete(ExecutablePath + ":Zone.Identifier");
                     }
-                    catch (Exception ex) { LogMessage?.Invoke($"[manager] unload failed: {ex.Message}"); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+                    {
+                        LogMessage?.Invoke($"[manager] unblock warning: {ex.Message}");
+                    }
                 }
-    
+
                 var psiStart = new ProcessStartInfo
                 {
                     FileName = ExecutablePath,
-                    Arguments = args,
                     WorkingDirectory = WorkingDirectory ?? AppDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -98,7 +65,9 @@ public partial class LlamaSwapProcessManager : IDisposable
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-    
+                psiStart.ArgumentList.Add("--config");
+                psiStart.ArgumentList.Add(ConfigPath);
+
                 _process = new Process { StartInfo = psiStart, EnableRaisingEvents = true };
                 _process.OutputDataReceived += (s, e) => { if (!string.IsNullOrEmpty(e.Data)) LogMessage?.Invoke($"[out] {e.Data}"); };
                 _process.ErrorDataReceived += (s, e) => { if (!string.IsNullOrEmpty(e.Data)) LogMessage?.Invoke($"[err] {e.Data}"); };

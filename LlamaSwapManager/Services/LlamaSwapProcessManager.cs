@@ -28,6 +28,10 @@ public partial class LlamaSwapProcessManager : IDisposable
 
     private Process? _process;
     private readonly object _lock = new();
+    private readonly HttpClient _localHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(3)
+    };
 
     public event Action<LlamaSwapStatus>? StatusChanged;
     public event Action<string>? LogMessage;

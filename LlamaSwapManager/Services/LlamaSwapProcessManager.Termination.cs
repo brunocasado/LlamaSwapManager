@@ -16,10 +16,12 @@ public partial class LlamaSwapProcessManager : IDisposable
         {
             try
             {
-                var swaps = Process.GetProcessesByName("llama-swap").Select(p => $"llama-swap:{p.Id}").ToList();
-                var servers = Process.GetProcessesByName("llama-server").Select(p => $"llama-server:{p.Id}").ToList();
-                var api = Task.Run(async () => await DetectApiBaseUrlAsync()).GetAwaiter().GetResult();
-                LogMessage?.Invoke($"[manager] {reason} | api={api ?? "none"} | processes={string.Join(", ", swaps.Concat(servers).DefaultIfEmpty("none"))}");
+                using var processes = new ProcessCollection(GetManagedLlamaProcesses());
+                var snapshot = processes.Processes
+                    .Select(process => $"{process.ProcessName}:{process.Id}")
+                    .DefaultIfEmpty("none");
+                LogMessage?.Invoke(
+                    $"[manager] {reason} | api={ApiBaseUrl ?? "none"} | processes={string.Join(", ", snapshot)}");
             }
             catch (Exception ex)
             {
@@ -32,27 +34,88 @@ public partial class LlamaSwapProcessManager : IDisposable
         /// Collect every running llama-swap / llama-server process by name.
         /// Orphans from previous Manager sessions must be included or Stop/Quit hang forever.
         /// </summary>
-        private static List<Process> GetAllLlamaProcesses()
+        private List<Process> GetManagedLlamaProcesses()
         {
             var map = new Dictionary<int, Process>();
-            void AddRange(IEnumerable<Process> processes)
+            HashSet<int> ownedPids;
+            lock (_managedPids)
             {
-                foreach (var p in processes)
+                ownedPids = new HashSet<int>(_managedPids);
+            }
+
+            void AddRange(IEnumerable<Process> processes, string? expectedPath)
+            {
+                foreach (var process in processes)
                 {
                     try
                     {
-                        if (!p.HasExited)
-                            map[p.Id] = p;
+                        if (process.HasExited)
+                        {
+                            process.Dispose();
+                            continue;
+                        }
+
+                        var owned = ownedPids.Contains(process.Id);
+                        var processPath = TryGetProcessPath(process);
+                        if (owned || IsExpectedExecutable(processPath, expectedPath))
+                        {
+                            map[process.Id] = process;
+                        }
+                        else
+                        {
+                            process.Dispose();
+                        }
                     }
-                    catch { /* disposed / race */ }
+                    catch (InvalidOperationException)
+                    {
+                        process.Dispose();
+                    }
+                    catch (System.ComponentModel.Win32Exception)
+                    {
+                        process.Dispose();
+                    }
                 }
             }
-    
-            AddRange(Process.GetProcessesByName("llama-swap"));
-            AddRange(Process.GetProcessesByName("llama-server"));
+
+            AddRange(Process.GetProcessesByName("llama-swap"), ExecutablePath);
+            var serverName = OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
+            var serverPath = string.IsNullOrWhiteSpace(LlamaCppDirectory)
+                ? null
+                : Path.Combine(LlamaCppDirectory, serverName);
+            AddRange(Process.GetProcessesByName("llama-server"), serverPath);
             return map.Values.ToList();
         }
-    
+
+        internal static bool IsExpectedExecutable(string? processPath, string? expectedPath)
+        {
+            if (string.IsNullOrWhiteSpace(processPath) || string.IsNullOrWhiteSpace(expectedPath))
+                return false;
+
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            try
+            {
+                return string.Equals(Path.GetFullPath(processPath), Path.GetFullPath(expectedPath), comparison);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return false;
+            }
+        }
+
+        private static string? TryGetProcessPath(Process process)
+        {
+            try
+            {
+                return process.MainModule?.FileName;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+            {
+                return null;
+            }
+        }
+
         private void ClearManagedPids()
         {
             lock (_managedPids)
@@ -66,7 +129,7 @@ public partial class LlamaSwapProcessManager : IDisposable
         {
             LogMessage?.Invoke($"[manager] gracefully stopping llama processes: {reason}");
     
-            var processes = GetAllLlamaProcesses();
+            var processes = GetManagedLlamaProcesses();
             if (processes.Count == 0)
             {
                 ClearManagedPids();
@@ -86,11 +149,13 @@ public partial class LlamaSwapProcessManager : IDisposable
                         var psi = new ProcessStartInfo
                         {
                             FileName = "taskkill.exe",
-                            Arguments = $"/T /PID {p.Id}",
-                            UseShellExecute = true,
+                            UseShellExecute = false,
                             CreateNoWindow = true,
                             WindowStyle = ProcessWindowStyle.Hidden
                         };
+                        psi.ArgumentList.Add("/T");
+                        psi.ArgumentList.Add("/PID");
+                        psi.ArgumentList.Add(p.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
                         using var proc = Process.Start(psi);
                         if (proc is not null)
                         {
@@ -135,7 +200,7 @@ public partial class LlamaSwapProcessManager : IDisposable
         {
             LogMessage?.Invoke($"[manager] killing llama processes: {reason}");
     
-            foreach (var p in GetAllLlamaProcesses())
+            foreach (var p in GetManagedLlamaProcesses())
             {
                 try
                 {
@@ -149,64 +214,6 @@ public partial class LlamaSwapProcessManager : IDisposable
                 {
                     LogMessage?.Invoke($"[manager] kill failed pid={p.Id}: {ex.Message}");
                 }
-            }
-    
-            // Final OS-native name sweep for stubborn trees / orphans.
-            try
-            {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    foreach (var p in GetAllLlamaProcesses())
-                    {
-                        try
-                        {
-                            var psi = new ProcessStartInfo
-                            {
-                                FileName = "taskkill.exe",
-                                Arguments = $"/F /T /PID {p.Id}",
-                                UseShellExecute = true,
-                                CreateNoWindow = true,
-                                WindowStyle = ProcessWindowStyle.Hidden
-                            };
-                            using var proc = Process.Start(psi);
-                            if (proc is not null)
-                            {
-                                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                                try { await proc.WaitForExitAsync(cts.Token); } catch { }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-                else
-                {
-                    foreach (var name in new[] { "llama-swap", "llama-server" })
-                    {
-                        try
-                        {
-                            var psi = new ProcessStartInfo
-                            {
-                                FileName = "/usr/bin/pkill",
-                                Arguments = $"-9 -x {name}",
-                                UseShellExecute = false,
-                                CreateNoWindow = true,
-                                RedirectStandardError = true,
-                                RedirectStandardOutput = true
-                            };
-                            using var proc = Process.Start(psi);
-                            if (proc is not null)
-                            {
-                                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                                try { await proc.WaitForExitAsync(cts.Token); } catch { }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogMessage?.Invoke($"[manager] final sweep error: {ex.Message}");
             }
     
             var deadline = DateTime.UtcNow.AddSeconds(5);

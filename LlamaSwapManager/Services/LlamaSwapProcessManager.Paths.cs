@@ -34,13 +34,15 @@ public partial class LlamaSwapProcessManager : IDisposable
         /// </summary>
         public void ResolveLlamaServerPath()
         {
+            var serverFileName = OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
+
             // Check the default ~/.llama/ directory first
             var defaultPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".llama");
             if (Directory.Exists(defaultPath))
             {
                 // Check if it contains llama-server binary
-                var serverPath = Path.Combine(defaultPath, "llama-server");
+                var serverPath = Path.Combine(defaultPath, serverFileName);
                 if (File.Exists(serverPath))
                 {
                     LlamaCppDirectory = defaultPath;
@@ -52,7 +54,7 @@ public partial class LlamaSwapProcessManager : IDisposable
             var swapPath = Path.Combine(UserDirectory, "llama.cpp");
             if (Directory.Exists(swapPath))
             {
-                var serverPath = Path.Combine(swapPath, "llama-server");
+                var serverPath = Path.Combine(swapPath, serverFileName);
                 if (File.Exists(serverPath))
                 {
                     LlamaCppDirectory = swapPath;
@@ -63,7 +65,7 @@ public partial class LlamaSwapProcessManager : IDisposable
             // Check if llama-server is in the llama-swap app directory
             if (Directory.Exists(AppDirectory))
             {
-                var serverPath = Path.Combine(AppDirectory, "llama-server");
+                var serverPath = Path.Combine(AppDirectory, serverFileName);
                 if (File.Exists(serverPath))
                 {
                     LlamaCppDirectory = AppDirectory;
@@ -77,15 +79,38 @@ public partial class LlamaSwapProcessManager : IDisposable
         }
     
         public void RefreshPaths() => ResolvePaths();
-        public void DetectApiUrl() => _ = Task.Run(async () => ApiBaseUrl = await DetectApiBaseUrlAsync());
-        public void DetectLlamaServerUrl() => _ = Task.Run(async () => LlamaServerBaseUrl = await DetectLlamaServerBaseUrlAsync());
-    
+
+        public void DetectApiUrl() => ObserveDetectionAsync(
+            DetectApiBaseUrlAsync(),
+            value => ApiBaseUrl = value,
+            "API URL detection");
+
+        public void DetectLlamaServerUrl() => ObserveDetectionAsync(
+            DetectLlamaServerBaseUrlAsync(),
+            value => LlamaServerBaseUrl = value,
+            "llama-server URL detection");
+
         /// <summary>
         /// Public alias for dynamic re-detection. Call this from the metrics polling loop
         /// so that when llama-swap switches models (and thus the upstream llama-server port),
         /// the manager picks up the new port automatically.
         /// </summary>
-        public void RefreshLlamaServerUrl() => _ = Task.Run(async () => LlamaServerBaseUrl = await DetectLlamaServerBaseUrlAsync());
+        public void RefreshLlamaServerUrl() => DetectLlamaServerUrl();
+
+        private async void ObserveDetectionAsync(
+            Task<string?> detectionTask,
+            Action<string?> apply,
+            string operation)
+        {
+            try
+            {
+                apply(await detectionTask);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                LogMessage?.Invoke($"[manager] {operation} failed: {ex.Message}");
+            }
+        }
     
         private string? ResolveExecutable()
         {
