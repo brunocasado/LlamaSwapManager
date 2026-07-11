@@ -51,6 +51,28 @@ public sealed class ArchiveExtractorTests
         Assert.False(Directory.Exists(Path.Combine(destination, "release")));
     }
 
+    [Fact]
+    public void ExtractZip_PreservesFlatArchiveLayout()
+    {
+        using var fixture = new ArchiveFixture();
+        var archivePath = Path.Combine(fixture.Root, "flat.zip");
+        var destination = Path.Combine(fixture.Root, "flat-output");
+
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            using (var first = new StreamWriter(archive.CreateEntry("llama-server").Open()))
+                first.Write("server");
+
+            using (var second = new StreamWriter(archive.CreateEntry("README.md").Open()))
+                second.Write("readme");
+        }
+
+        ArchiveExtractor.ExtractZip(archivePath, destination);
+
+        Assert.Equal("server", File.ReadAllText(Path.Combine(destination, "llama-server")));
+        Assert.Equal("readme", File.ReadAllText(Path.Combine(destination, "README.md")));
+    }
+
     private sealed class ArchiveFixture : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), $"archive-tests-{Guid.NewGuid()}");

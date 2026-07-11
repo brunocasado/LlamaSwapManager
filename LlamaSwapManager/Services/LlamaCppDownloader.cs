@@ -586,8 +586,8 @@ public class LlamaCppDownloader : IDisposable
 
         // Kill any running llama-server/llama-cpp processes before install
         LogMessage?.Invoke("[llama.cpp] Stopping llama-server processes before update...");
-        await KillLlamaServerProcessesAsync(targetDirectory);
-        await Task.Delay(1000); // Give processes time to release file handles
+        await KillLlamaServerProcessesAsync(targetDirectory, ct);
+        await Task.Delay(1000, ct); // Give processes time to release file handles
 
         try
         {
@@ -871,29 +871,39 @@ private void CopyDirectoryContents(string sourceDir, string targetDir)
         /// Kill any running llama-server/llama-cpp processes to release file handles before install.
         /// Uses graceful SIGTERM first, then forceful kill as fallback.
         /// </summary>
-        private async Task KillLlamaServerProcessesAsync(string targetDirectory)
+        private async Task KillLlamaServerProcessesAsync(string targetDirectory, CancellationToken ct)
         {
             var serverExe = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? "llama-server.exe"
                 : "llama-server";
+            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
 
-            // Find processes that have the target directory's binary in use
-            var serverPath = Path.Combine(targetDirectory, serverExe);
+            var serverPath = Path.GetFullPath(Path.Combine(targetDirectory, serverExe));
             var processesToKill = new List<Process>();
 
             try
             {
-                foreach (var p in Process.GetProcessesByName("llama-server"))
+                foreach (var process in Process.GetProcessesByName("llama-server"))
                 {
                     try
                     {
-                        if (p.MainModule?.FileName == serverPath ||
-                            p.MainModule?.FileName?.Contains("llama-server") == true)
+                        var processPath = process.MainModule?.FileName;
+                        if (processPath != null &&
+                            string.Equals(Path.GetFullPath(processPath), serverPath, comparison))
                         {
-                            processesToKill.Add(p);
+                            processesToKill.Add(process);
+                        }
+                        else
+                        {
+                            process.Dispose();
                         }
                     }
-                    catch { /* Process may have exited */ }
+                    catch
+                    {
+                        process.Dispose();
+                    }
                 }
             }
             catch { }
@@ -904,84 +914,83 @@ private void CopyDirectoryContents(string sourceDir, string targetDir)
                 return;
             }
 
-            LogMessage?.Invoke($"[llama.cpp] Found {processesToKill.Count} llama-server process(es) to stop");
-
-            // Phase 1: Graceful shutdown via SIGTERM/taskkill
-            foreach (var p in processesToKill)
+            try
             {
-                try
+                LogMessage?.Invoke($"[llama.cpp] Found {processesToKill.Count} llama-server process(es) to stop");
+
+                foreach (var process in processesToKill)
                 {
-                    LogMessage?.Invoke($"[llama.cpp] Sending graceful stop to llama-server pid={p.Id}");
-                    if (!p.HasExited)
+                    ct.ThrowIfCancellationRequested();
+
+                    try
                     {
+                        LogMessage?.Invoke($"[llama.cpp] Sending graceful stop to llama-server pid={process.Id}");
+                        if (process.HasExited)
+                            continue;
+
                         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                         {
-                            var psi = new System.Diagnostics.ProcessStartInfo
+                            var startInfo = new ProcessStartInfo
                             {
                                 FileName = "taskkill.exe",
-                                Arguments = $"/T /PID {p.Id}",
-                                UseShellExecute = true,
-                                CreateNoWindow = true,
-                                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+                                Arguments = $"/T /PID {process.Id}",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
                             };
-                            using var tk = Process.Start(psi);
-                            tk?.WaitForExit();
+
+                            using var taskKill = Process.Start(startInfo);
+                            if (taskKill != null)
+                                await taskKill.WaitForExitAsync(ct);
                         }
                         else
                         {
-                            p.Kill(false);
+                            process.Kill(entireProcessTree: false);
                         }
                     }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Graceful stop failed pid={p.Id}: {ex.Message}");
-                }
-            }
-
-            // Wait for processes to exit
-            var deadline = DateTime.Now.AddSeconds(5);
-            foreach (var p in processesToKill)
-            {
-                try
-                {
-                    if (!p.HasExited)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        p.WaitForExit((int)(deadline - DateTime.Now).TotalMilliseconds);
+                        LogMessage?.Invoke($"[llama.cpp] Graceful stop failed pid={process.Id}: {ex.Message}");
                     }
                 }
-                catch { }
-            }
 
-            // Phase 2: Force kill any remaining processes
-            foreach (var p in processesToKill)
-            {
-                try
+                foreach (var process in processesToKill)
                 {
-                    if (!p.HasExited)
+                    try
                     {
-                        LogMessage?.Invoke($"[llama.cpp] Force killing llama-server pid={p.Id}");
-                        p.Kill(entireProcessTree: true);
+                        if (!process.HasExited)
+                            await process.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(5), ct);
+                    }
+                    catch (TimeoutException) { }
+                    catch (InvalidOperationException) { }
+                }
+
+                foreach (var process in processesToKill)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            LogMessage?.Invoke($"[llama.cpp] Force killing llama-server pid={process.Id}");
+                            process.Kill(entireProcessTree: true);
+                            await process.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(2), ct);
+                        }
+                    }
+                    catch (TimeoutException) { }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        LogMessage?.Invoke($"[llama.cpp] Force kill failed pid={process.Id}: {ex.Message}");
                     }
                 }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"[llama.cpp] Force kill failed pid={p.Id}: {ex.Message}");
-                }
-            }
 
-            // Final wait
-            foreach (var p in processesToKill)
+                LogMessage?.Invoke("[llama.cpp] llama-server processes stopped");
+            }
+            finally
             {
-                try
-                {
-                    if (!p.HasExited)
-                        p.WaitForExit(2000);
-                }
-                catch { }
+                foreach (var process in processesToKill)
+                    process.Dispose();
             }
-
-            LogMessage?.Invoke("[llama.cpp] llama-server processes stopped");
         }
 
         // ---- Local Version Detection ----
