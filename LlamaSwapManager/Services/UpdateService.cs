@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Formats.Tar;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -397,6 +398,7 @@ public class UpdateService : IDisposable
             var processes = Process.GetProcessesByName("llama-swap");
             foreach (var p in processes)
             {
+
                 try
                 {
                     if (!p.HasExited)
@@ -525,28 +527,7 @@ public class UpdateService : IDisposable
         {
             using var fileStream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
-            using var reader = new TarReader(gzipStream);
-
-            foreach (var entry in reader)
-            {
-                var targetPath = Path.Combine(extractDir, entry.FileName);
-                var targetDir = Path.GetDirectoryName(targetPath);
-
-                if (!string.IsNullOrEmpty(targetDir) && !Directory.Exists(targetDir))
-                {
-                    Directory.CreateDirectory(targetDir);
-                }
-
-                if (entry.FileSize == 0 && !Path.HasExtension(entry.FileName))
-                {
-                    // Directory entry
-                    continue;
-                }
-
-                using var targetStream = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                entry.CopyTo(targetStream);
-            }
-
+            TarFile.ExtractToDirectory(gzipStream, extractDir, overwriteFiles: true);
             return true;
         }
         catch (Exception ex)
@@ -789,161 +770,7 @@ public class UpdateService : IDisposable
         return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
     }
 
-    // =====================================================================
-    // TarReader: lightweight tar.gz extraction (no external dependency)
-    // =====================================================================
-
-    private class TarReader : IEnumerable<TarReader.TarEntry>, IDisposable
-    {
-        private readonly Stream _baseStream;
-        private readonly Stream? _stream;
-
-        public TarReader(Stream baseStream)
-        {
-            _baseStream = baseStream;
-            // Use the stream as-is (caller may already have wrapped in GZipStream)
-            _stream = baseStream;
-        }
-
-        public IEnumerator<TarReader.TarEntry> GetEnumerator()
-        {
-            var buffer = new byte[512];
-            var headerBuffer = new byte[512];
-
-            while (ReadBlock(_stream!, headerBuffer) == 512)
-            {
-                // Check for end of archive (all zeros)
-                var isEmpty = headerBuffer.All(b => b == 0);
-                if (isEmpty) break;
-
-                var header = new TarHeader(headerBuffer);
-                if (header.FileName == "") continue;
-
-                var entry = new TarEntry(header, _stream!);
-                yield return entry;
-
-                // Skip file data (aligned to 512-byte blocks)
-                var dataBlocks = (header.FileSize + 511) / 512;
-                for (var i = 0; i < dataBlocks; i++)
-                {
-                    var bytesRead = ReadBlock(_stream!, buffer);
-                    if (bytesRead < 512) break;
-                }
-            }
-        }
-
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
-
-        private static int ReadBlock(Stream stream, byte[] buffer)
-        {
-            var totalRead = 0;
-            while (totalRead < buffer.Length)
-            {
-                var bytesRead = stream.Read(buffer, totalRead, buffer.Length - totalRead);
-                if (bytesRead == 0) break;
-                totalRead += bytesRead;
-            }
-            return totalRead;
-        }
-
-        public class TarHeader
-        {
-            public string FileName { get; init; } = "";
-            public long FileSize { get; init; }
-            public int Mode { get; init; }
-
-            public TarHeader(byte[] buffer)
-            {
-                // Parse filename (first 100 bytes)
-                var nameBytes = new byte[100];
-                Array.Copy(buffer, 0, nameBytes, 0, 100);
-                FileName = Encoding.UTF8.GetString(nameBytes).TrimEnd('\0');
-
-                // Parse file size (offset 124, 12 bytes, octal)
-                var sizeBytes = new byte[12];
-                Array.Copy(buffer, 124, sizeBytes, 0, 12);
-                var sizeStr = Encoding.UTF8.GetString(sizeBytes).TrimEnd('\0');
-                if (!string.IsNullOrEmpty(sizeStr) && sizeStr != " ")
-                {
-                    try
-                    {
-                        FileSize = Convert.ToInt64(sizeStr, 8);
-                    }
-                    catch
-                    {
-                        FileSize = 0;
-                    }
-                }
-
-                // Parse mode (offset 100, 8 bytes, octal)
-                var modeBytes = new byte[8];
-                Array.Copy(buffer, 100, modeBytes, 0, 8);
-                var modeStr = Encoding.UTF8.GetString(modeBytes).TrimEnd('\0');
-                if (!string.IsNullOrEmpty(modeStr) && modeStr != " ")
-                {
-                    try
-                    {
-                        Mode = Convert.ToInt32(modeStr, 8);
-                    }
-                    catch
-                    {
-                        Mode = 0;
-                    }
-                }
-            }
-        }
-
-        public class TarEntry
-        {
-            public TarHeader Header { get; }
-            private readonly Stream _stream;
-
-            public TarEntry(TarHeader header, Stream stream)
-            {
-                Header = header;
-                _stream = stream;
-            }
-
-            public string FileName => Header.FileName;
-            public long FileSize => Header.FileSize;
-
-            public void CopyTo(Stream destination)
-            {
-                var buffer = new byte[81920];
-                var remaining = (int)Header.FileSize;
-
-                while (remaining > 0)
-                {
-                    var toRead = Math.Min(buffer.Length, remaining);
-                    var bytesRead = _stream.Read(buffer, 0, toRead);
-                    if (bytesRead == 0) break;
-
-                    destination.Write(buffer, 0, bytesRead);
-                    remaining -= bytesRead;
-                }
-
-                // Align to 512-byte boundary
-                var dataBlocks = (Header.FileSize + 511) / 512;
-                var paddedSize = dataBlocks * 512;
-                var padding = paddedSize - Header.FileSize;
-                if (padding > 0 && padding < 512)
-                {
-                    var padBuffer = new byte[padding];
-                    _stream.Read(padBuffer, 0, (int)padding);
-                }
-            }
-        }
-
-    public void Dispose()
-    {
-        _stream?.Dispose();
-    }    }
-
-
-    // =====================================================================
+// =====================================================================
     // Data structures
     // =====================================================================
 
