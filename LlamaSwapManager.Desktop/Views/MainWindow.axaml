@@ -818,7 +818,7 @@
                                   HorizontalContentAlignment="Center"
                                   IsEnabled="{Binding LlamaDeckUpdateButtonEnabled}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                              <TextBlock Text="↓" FontSize="17" VerticalAlignment="Center"/>
+                              <TextBlock Text="↓" FontSize="13" Width="16" TextAlignment="Center" VerticalAlignment="Center"/>
                               <TextBlock Text="Update now" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             </StackPanel>
                           </Button>
@@ -828,7 +828,7 @@
                                   HorizontalContentAlignment="Center"
                                   IsEnabled="{Binding LlamaDeckCheckButtonEnabled}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                              <TextBlock Text="↻" FontSize="17" VerticalAlignment="Center"/>
+                              <TextBlock Text="↻" FontSize="13" Width="16" TextAlignment="Center" VerticalAlignment="Center"/>
                               <TextBlock Text="Check again" VerticalAlignment="Center"/>
                             </StackPanel>
                           </Button>
@@ -961,7 +961,7 @@
                                 HorizontalContentAlignment="Center"
                                 IsEnabled="{Binding LlamaCppCheckButtonEnabled}">
                           <StackPanel Orientation="Horizontal" Spacing="7">
-                            <TextBlock Text="↻" FontSize="16"/>
+                            <TextBlock Text="↻" FontSize="13" Width="16" TextAlignment="Center" VerticalAlignment="Center"/>
                             <TextBlock Text="Check"/>
                           </StackPanel>
                         </Button>
@@ -972,7 +972,7 @@
                                 HorizontalContentAlignment="Center"
                                 IsEnabled="{Binding LlamaCppUpdateButtonEnabled}">
                           <StackPanel Orientation="Horizontal" Spacing="7">
-                            <TextBlock Text="↓" FontSize="16"/>
+                            <TextBlock Text="↓" FontSize="13" Width="16" TextAlignment="Center" VerticalAlignment="Center"/>
                             <TextBlock Text="Update"/>
                           </StackPanel>
                         </Button>
@@ -1070,7 +1070,7 @@
                                 HorizontalContentAlignment="Center"
                                 IsEnabled="{Binding CheckButtonEnabled}">
                           <StackPanel Orientation="Horizontal" Spacing="7">
-                            <TextBlock Text="↻" FontSize="16"/>
+                            <TextBlock Text="↻" FontSize="13" Width="16" TextAlignment="Center" VerticalAlignment="Center"/>
                             <TextBlock Text="Check"/>
                           </StackPanel>
                         </Button>
@@ -1081,7 +1081,7 @@
                                 HorizontalContentAlignment="Center"
                                 IsEnabled="{Binding UpdateButtonEnabled}">
                           <StackPanel Orientation="Horizontal" Spacing="7">
-                            <TextBlock Text="↓" FontSize="16"/>
+                            <TextBlock Text="↓" FontSize="13" Width="16" TextAlignment="Center" VerticalAlignment="Center"/>
                             <TextBlock Text="Update"/>
                           </StackPanel>
                         </Button>
@@ -1090,58 +1090,6 @@
                   </Grid>
                 </Border>
 
-                <!-- Current update behavior, intentionally not interactive -->
-                <Border Padding="17"
-                        Background="#12121B"
-                        BorderBrush="#29293B"
-                        BorderThickness="1"
-                        CornerRadius="11">
-                  <Grid ColumnDefinitions="32,*" ColumnSpacing="12">
-                    <TextBlock Grid.Column="0"
-                               Text="⚙"
-                               FontSize="20"
-                               Foreground="#A6ADC8"
-                               VerticalAlignment="Top"/>
-                    <StackPanel Grid.Column="1" Spacing="10">
-                      <TextBlock Text="Update behavior"
-                                 FontSize="14"
-                                 FontWeight="Bold"
-                                 Foreground="#CDD6F4"/>
-                      <Grid ColumnDefinitions="*,*,*" ColumnSpacing="24">
-                        <StackPanel Grid.Column="0" Spacing="3">
-                          <TextBlock Text="Automatic checks"
-                                     FontSize="12"
-                                     FontWeight="SemiBold"
-                                     Foreground="#BAC2DE"/>
-                          <TextBlock Text="Checks run when the Updates page opens."
-                                     FontSize="10"
-                                     Foreground="#6C7086"
-                                     TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Spacing="3">
-                          <TextBlock Text="Manual installation"
-                                     FontSize="12"
-                                     FontWeight="SemiBold"
-                                     Foreground="#BAC2DE"/>
-                          <TextBlock Text="Downloads only start after you click Update."
-                                     FontSize="10"
-                                     Foreground="#6C7086"
-                                     TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <StackPanel Grid.Column="2" Spacing="3">
-                          <TextBlock Text="Stable releases"
-                                     FontSize="12"
-                                     FontWeight="SemiBold"
-                                     Foreground="#BAC2DE"/>
-                          <TextBlock Text="LlamaDeck follows the latest stable GitHub tag."
-                                     FontSize="10"
-                                     Foreground="#6C7086"
-                                     TextWrapping="Wrap"/>
-                        </StackPanel>
-                      </Grid>
-                    </StackPanel>
-                  </Grid>
-                </Border>
               </StackPanel>
             </ScrollViewer>
           </Grid>
